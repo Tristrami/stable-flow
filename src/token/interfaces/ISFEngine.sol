@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 interface ISFEngine {
+    
     /**
      * @dev Deposit collateral token and mint sf token
      * @param collateralTokenAddress The address of collateral token contract
@@ -38,6 +39,7 @@ interface ISFEngine {
     /**
      * @dev Get user's collateral ratio
      * @param user The account address of user
+     * @return collateralRatio user's collateral ratio
      */
     function getCollateralRatio(address user) external returns (uint256);
 }

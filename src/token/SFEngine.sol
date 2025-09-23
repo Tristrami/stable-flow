@@ -24,7 +24,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     uint256 private constant MINIMUM_COLLATERAL_RATIO = 2 * PRECISION_FACTOR;
 
     /* -------------------------------------------------------------------------- */
-    /*                              State Variables                             */
+    /*                              State Variables                               */
     /* -------------------------------------------------------------------------- */
 
     SFToken private s_sfToken;

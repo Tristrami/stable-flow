@@ -348,8 +348,8 @@ contract SFEngineTest is Test, Constants {
         uint256 startingLiquidatorAmountDeposited = sfEngine.getCollateralAmount(liquidator, address(weth));
 
         sfToken.approve(address(sfEngine), debtToCover);
-        // Adjust weth / usd price to 1000$, this will break the collateral ratio, and collateral
-        // cant't cover (debt + bonus), liquidator will get all the collaterals without bonus
+        // Adjust weth / usd price to 1900$, this will break the collateral ratio, but liquidator can
+        // only liquidate a small amount of collateral to make the collateral ratio back to normal
         MockV3Aggregator wethPriceFeed = MockV3Aggregator(deployConfig.wethPriceFeedAddress);
         wethPriceFeed.updateAnswer(int256(1900 * (10 ** PRICE_FEED_DECIMALS)));
 
@@ -409,7 +409,8 @@ contract SFEngineTest is Test, Constants {
 
         sfToken.approve(address(sfEngine), debtToCover);
         // Adjust weth / usd price to 1000$, this will break the collateral ratio, and collateral
-        // cant't cover (debt + bonus), liquidator will get all the collaterals without bonus
+        // cant't cover (debt + bonus), liquidator will get all the collaterals by burning
+        // (debtToCover - bonus) amount of SF token
         MockV3Aggregator wethPriceFeed = MockV3Aggregator(deployConfig.wethPriceFeedAddress);
         wethPriceFeed.updateAnswer(int256(1000 * (10 ** PRICE_FEED_DECIMALS)));
 
