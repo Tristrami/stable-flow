@@ -6,7 +6,7 @@ import {IVault} from "./IVault.sol";
 
 interface ISFAccount is IRecoverable, IVault {
 
-    function balance() external returns (uint256);
+    function balance() external view returns (uint256);
 
     function transfer(address to, uint256 amount) external;
 

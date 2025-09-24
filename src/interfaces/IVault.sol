@@ -26,15 +26,25 @@ interface IVault {
 
     /**
      * @dev Liquidate user's collateral when collateral ratio is less than MINIMUM_COLLATERAL_RATIO
-     * @param user The account address of user whose collateral ratio is less than MINIMUM_COLLATERAL_RATIO
+     * @param account The account address whose collateral ratio is less than MINIMUM_COLLATERAL_RATIO
      * @param collateralTokenAddress The address of collateral token contract
      * @param debtToCover The amount of debt (sf token) to cover
      */
-    function liquidate(address user, address collateralTokenAddress, uint256 debtToCover) external;
+    function liquidate(address account, address collateralTokenAddress, uint256 debtToCover) external;
 
-    function deposit(address collateralAddress, uint256 amount) external;
+    function checkCollateralSafety() external view returns (bool danger, uint256 collateralRatio, uint256 liquidationThreshold);
 
-    function withdraw(address collateralAddress, uint256 amount) external;
+    function topUpCollateral(address collateralTokenAddress, uint256 amount) external;
 
-    function getCollateralBalance(address collateralAddress) external view returns (uint256);
+    function updateAutoTopUpSupport(bool enabled) external;
+
+    function deposit(address collateralTokenAddress, uint256 amount) external;
+
+    function withdraw(address collateralTokenAddress, uint256 amount) external;
+
+    function getCollateralBalance(address collateralTokenAddress) external view returns (uint256);
+
+    function getCustomCollateralRatio() external view returns (uint256);
+
+    function getDepositedCollaterals() external view returns (address[] memory);
 }

@@ -5,9 +5,7 @@ interface IRecoverable {
 
     function supportsSocialRecovery() external view returns (bool);
 
-    function enableSocialRecovery() external;
-
-    function disableSocialRecovery() external;
+    function updateSocialRecoverySupport(bool enabled) external;
 
     function initiateRecovery(address account, address newOwner) external;
 
@@ -15,11 +13,11 @@ interface IRecoverable {
 
     function approveRecovery(address account) external;
 
-    function receiveRecoveryApproval(address guardian) external;
+    function receiveRecoveryApproval() external;
 
     function cancelRecovery(address account) external;
 
-    function receiveRecoveryCancellation(address guardian) external;
+    function receiveRecoveryCancellation() external;
 
     function getRecoveryProgress() external view returns (
         bool isInRecoveryProgress, 

@@ -91,6 +91,15 @@ contract SFEngineTest is Test, Constants {
         assertEq(amountBtc, adjustNumberByPrecision(2, 0, PRECISION));
     }
 
+    function testGetSFTokenAmountByCollateral() public view {
+        uint256 ethAmount = 2 ether;
+        uint256 collateralRatio = 2 * PRECISION_FACTOR;
+        uint256 sfAmount = sfEngine.calculateSFTokensByCollateral(deployConfig.wethTokenAddress, ethAmount, collateralRatio);
+        uint256 expectedEthInUsd = ethAmount * adjustNumberByPrecision(WETH_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION) / PRECISION_FACTOR;
+        uint256 expectedSFAmount = expectedEthInUsd * sfEngine.getMinimumCollateralRatio() / PRECISION_FACTOR;
+        assertEq(sfAmount, expectedSFAmount);
+    }
+
     function test_RevertWhen_TokenAddressAndPriceFeedAddressLengthNotMatch() public {
         ERC20Mock token = new ERC20Mock("TEST", "TEST", msg.sender, 10);
         // Token address length < price feed address length

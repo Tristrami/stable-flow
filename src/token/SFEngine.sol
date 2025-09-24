@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ISFEngine} from "./interfaces/ISFEngine.sol";
+import {ISFEngine} from "../interfaces/ISFEngine.sol";
 import {SFToken} from "./SFToken.sol";
 import {Validator} from "./Validator.sol";
 import {IERC20} from "@openzeppelin/contracts/token/erc20/IERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {OracleLib, AggregatorV3Interface} from "./libraries/OracleLib.sol";
+import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
@@ -102,9 +102,9 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
         uint256 amountSFToMint
     )
         external
+        override
         notZeroAddress(collateralTokenAddress)
         notZeroValue(amountCollateral)
-        notZeroValue(amountSFToMint)
         onlySupportedToken(collateralTokenAddress)
     {
         _depositCollateral(collateralTokenAddress, amountCollateral);
@@ -117,6 +117,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
         uint256 amountSFToBurn
     )
         public
+        override
         notZeroAddress(collateralTokenAddress)
         notZeroValue(amountCollateralToRedeem)
         onlySupportedToken(collateralTokenAddress)
@@ -128,6 +129,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
 
     function liquidate(address user, address collateralTokenAddress, uint256 debtToCover)
         external
+        override
         notZeroAddress(collateralTokenAddress)
         notZeroValue(debtToCover)
         onlySupportedToken(collateralTokenAddress)
@@ -162,7 +164,26 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
         _revertIfCollateralRatioIsBroken(msg.sender);
     }
 
-    function getCollateralRatio(address user) public view returns (uint256) {
+    function calculateSFTokensByCollateral(
+        address collateralTokenAddress,
+        uint256 amountCollateral,
+        uint256 collateralRatio
+    ) external view override returns (uint256) {
+        uint256 collateralInUsd = _getTokenValueInUsd(collateralTokenAddress, amountCollateral);
+        return collateralInUsd * collateralRatio / PRECISION_FACTOR;
+    }
+
+    function getTotalCollateralValueInUsd(address user) public view override returns (uint256) {
+        uint256 totalCollateralValueInUsd;
+        for (uint256 i = 0; i < s_supportedTokenAddressSet.length(); i++) {
+            address tokenAddress = s_supportedTokenAddressSet.at(i);
+            uint256 amountCollateral = s_collaterals[user][tokenAddress];
+            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
+        }
+        return totalCollateralValueInUsd;
+    }
+
+    function getCollateralRatio(address user) public view override returns (uint256) {
         uint256 sfMinted = s_sfTokenMinted[user];
         if (sfMinted == 0) {
             return type(uint256).max;
@@ -174,6 +195,14 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
             totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
         }
         return totalCollateralValueInUsd * PRECISION_FACTOR / sfMinted;
+    }
+
+    function getMinimumCollateralRatio() public pure override returns (uint256) {
+        return MINIMUM_COLLATERAL_RATIO;
+    }
+
+    function getSFTokenAddress() public view override returns (address) {
+        return address(s_sfToken);
     }
 
     /* -------------------------------------------------------------------------- */
@@ -209,6 +238,9 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
      * @param amount Amount of token you want to mint, 18 decimals
      */
     function _mintSFToken(uint256 amount) private {
+        if (amount == 0) {
+            return;
+        }
         s_sfTokenMinted[msg.sender] += amount;
         _revertIfCollateralRatioIsBroken(msg.sender);
         emit SFEngine__SFTokenMinted(msg.sender, amount);
@@ -351,20 +383,12 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     /*                           Getter / View Functions                          */
     /* -------------------------------------------------------------------------- */
 
-    function getMinimumCollateralRatio() public pure returns (uint256) {
-        return MINIMUM_COLLATERAL_RATIO;
-    }
-
     function getCollateralAmount(address user, address collateralTokenAddress) public view returns (uint256) {
         return s_collaterals[user][collateralTokenAddress];
     }
 
     function getSFTokenMinted(address user) public view returns (uint256) {
         return s_sfTokenMinted[user];
-    }
-
-    function getSFTokenAddress() public view returns (address) {
-        return address(s_sfToken);
     }
 
     function getCollateralTokenAddresses() public view returns (address[] memory) {

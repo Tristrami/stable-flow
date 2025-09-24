@@ -37,9 +37,38 @@ interface ISFEngine {
     function liquidate(address user, address collateralTokenAddress, uint256 debtToCover) external;
 
     /**
+     * @dev Calculate the amount of SFToken based on the minimum collateral ratio
+     * @param collateralTokenAddress The address of collateral token contract
+     * @param amountCollateral The amount of collateral token
+     * @return amountSFToken The amount of SFToken
+     */
+    function calculateSFTokensByCollateral(
+        address collateralTokenAddress,
+        uint256 amountCollateral,
+        uint256 collateralRatio
+    ) external view returns (uint256);
+
+    /**
      * @dev Get user's collateral ratio
      * @param user The account address of user
      * @return collateralRatio user's collateral ratio
      */
-    function getCollateralRatio(address user) external returns (uint256);
+    function getCollateralRatio(address user) external view returns (uint256);
+
+    /**
+     * @dev Get user's total collateral value in usd
+     * @param user The account address of user
+     * @return totalCollateralValueInUsd total collateral value in usd
+     */
+    function getTotalCollateralValueInUsd(address user) external view returns (uint256);
+
+    /**
+     * @dev Get minimum collateral ratio
+     */
+    function getMinimumCollateralRatio() external view returns (uint256);
+
+    /**
+     * @dev Get the address of SFToken contract
+     */
+    function getSFTokenAddress() external returns (address);
 }
