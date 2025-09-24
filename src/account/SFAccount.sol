@@ -25,6 +25,7 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     /* -------------------------------------------------------------------------- */
 
     error SFAccount__OperationNotSupported();
+    error SFAccount__SocialRecoveryNotSupported();
     error SFAccount__OnlyGuardian();
     error SFAccount__TooManyGuardians(uint256 maxGuardians);
     error SfAccount__NotSFAccount(address account);
@@ -43,6 +44,8 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
 
+    event SFAccount__SocialRecoveryEnabled();
+    event SFAccount__SocialRecoveryDisabled();
     event SFAccount__GuardianAdded(address indexed guardian);
     event SFAccount__GuardianRemoved(address indexed guardian);
     event SFAccount__MaxGuardiansUpdated(uint8 indexed maxGuardians);
@@ -93,6 +96,8 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     address private entryPointAddress;
     /// @dev The address of the factory contract which creates this account contract
     address private accountFactoryAddress;
+    /// @dev Whether this account supports social recovery
+    bool private socialRecoveryEnabled;
     /// @dev Max number of guardians that can be added
     uint8 private maxGuardians;
     /// @dev Minimum amount of guardian approvals needed to recover the current account
@@ -111,6 +116,16 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     /* -------------------------------------------------------------------------- */
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
+
+    modifier recoverable() {
+        _requireSupportsSocialRecovery();
+        _;
+    }
+
+    modifier recoverableAccount(address account) {
+        _requireSupportsSocialRecovery(account);
+        _;
+    }
 
     modifier onlyGuardian() {
         if (!hasRole(GUARDIAN_ROLE, _msgSender())) {
@@ -154,6 +169,7 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
         sfEngine = ISFEngine(_sfEngineAddress);
         accountFactoryAddress = _accountFactoryAddress;
         frozen = false;
+        socialRecoveryEnabled = false;
     }
 
     function reinitialize(
@@ -254,13 +270,36 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
 
     }
 
+    function supportsSocialRecovery() public view override returns (bool) {
+        return socialRecoveryEnabled;
+    }
+
     /// @inheritdoc IRecoverable
-    function initiateRecovery(address account, address newOwner) external override onlyOwner notFrozen onlySFAccount(account) {
+    function enableSocialRecovery() external onlyOwner override {
+        socialRecoveryEnabled = true;
+        emit SFAccount__SocialRecoveryEnabled();
+    }
+
+    /// @inheritdoc IRecoverable
+    function disableSocialRecovery() external onlyOwner override {
+        socialRecoveryEnabled = false;
+        emit SFAccount__SocialRecoveryDisabled();
+    }
+
+    /// @inheritdoc IRecoverable
+    function initiateRecovery(address account, address newOwner) 
+        external 
+        override 
+        onlyOwner 
+        notFrozen 
+        onlySFAccount(account)
+        recoverableAccount(account) 
+    {
         ISFAccount(account).receiveRecoveryInitiation(newOwner);
     }
 
     /// @inheritdoc IRecoverable
-    function receiveRecoveryInitiation(address newOwner) external override onlyGuardian {
+    function receiveRecoveryInitiation(address newOwner) external override onlyGuardian recoverable {
         RecoveryRecord memory pendingRecovery = _getPendingRecovery();
         if (pendingRecovery.previousOwner != address(0)) {
             revert SFAccount__RecoveryAlreadyInitiated(pendingRecovery.newOwner);
@@ -280,12 +319,19 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     }
 
     /// @inheritdoc IRecoverable
-    function approveRecovery(address account) external override onlyOwner notFrozen onlySFAccount(account) {
+    function approveRecovery(address account) 
+        external 
+        override 
+        onlyOwner 
+        notFrozen 
+        onlySFAccount(account) 
+        recoverableAccount(account) 
+    {
         ISFAccount(account).receiveRecoveryApproval(address(this));
     }
 
     /// @inheritdoc IRecoverable
-    function receiveRecoveryApproval(address guardian) external override onlyGuardian {
+    function receiveRecoveryApproval(address guardian) external override onlyGuardian recoverable {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         recoveryRecord.approvedGuardians.push(guardian);
         emit SFAccount__RecoveryApproved(guardian);
@@ -297,12 +343,19 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     }
 
     /// @inheritdoc IRecoverable
-    function cancelRecovery(address account) external override onlyOwner notFrozen onlySFAccount(account) {
+    function cancelRecovery(address account) 
+        external 
+        override 
+        onlyOwner 
+        notFrozen 
+        onlySFAccount(account) 
+        recoverableAccount(account) 
+    {
         ISFAccount(account).receiveRecoveryCancellation(address(this));
     }
 
     /// @inheritdoc IRecoverable
-    function receiveRecoveryCancellation(address guardian) external override onlyGuardian {
+    function receiveRecoveryCancellation(address guardian) external override onlyGuardian recoverable {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         recoveryRecord.isCancelled = true;
         recoveryRecord.cancelledBy = guardian;
@@ -311,7 +364,7 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     }
 
     /// @inheritdoc IRecoverable
-    function getRecoveryProgress() external view override returns (
+    function getRecoveryProgress() external view override recoverable returns (
         bool isInRecoveryProgress, 
         uint256 currentApprovals, 
         uint256 requiredApprovals, 
@@ -329,12 +382,12 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     }
 
     /// @inheritdoc IRecoverable
-    function getGuardians() external view override returns (address[] memory) {
+    function getGuardians() external view override recoverable returns (address[] memory) {
         return guardians.values();
     }
 
     /// @inheritdoc IRecoverable
-    function addGuardian(address guardian) public override onlyOwner notFrozen {
+    function addGuardian(address guardian) public override onlyOwner recoverable notFrozen {
         _requireSFAccount(guardian);
         if (guardians.length() == maxGuardians) {
             revert SFAccount__TooManyGuardians(maxGuardians);
@@ -345,7 +398,7 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     }
 
     /// @inheritdoc IRecoverable
-    function removeGuardian(address guardian) external override onlyOwner notFrozen {
+    function removeGuardian(address guardian) external override onlyOwner recoverable notFrozen {
         _requireSFAccount(guardian);
         _revokeRole(GUARDIAN_ROLE, guardian);
         guardians.remove(guardian);
@@ -353,7 +406,7 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     }
 
     /// @inheritdoc IRecoverable
-    function isGuardian(address account) external view override returns (bool) {
+    function isGuardian(address account) external view recoverable override returns (bool) {
         return guardians.contains(account);
     }
 
@@ -416,6 +469,18 @@ contract SFAccount is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControl
     function _requireSFAccount(address account) private view {
         if (account == address(0) || !account.supportsInterface(type(ISFAccount).interfaceId)) {
             revert SfAccount__NotSFAccount(account);
+        }
+    }
+
+    function _requireSupportsSocialRecovery() private view {
+        if (!supportsSocialRecovery()) {
+            revert SFAccount__SocialRecoveryNotSupported();
+        }
+    }
+
+    function _requireSupportsSocialRecovery(address account) private view {
+        if (!ISFAccount(account).supportsSocialRecovery()) {
+            revert SFAccount__SocialRecoveryNotSupported();
         }
     }
 

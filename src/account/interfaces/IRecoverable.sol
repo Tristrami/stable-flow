@@ -3,6 +3,12 @@ pragma solidity ^0.8.30;
 
 interface IRecoverable {
 
+    function supportsSocialRecovery() external view returns (bool);
+
+    function enableSocialRecovery() external;
+
+    function disableSocialRecovery() external;
+
     function initiateRecovery(address account, address newOwner) external;
 
     function receiveRecoveryInitiation(address newOwner) external;
