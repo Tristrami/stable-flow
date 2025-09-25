@@ -362,14 +362,19 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         bool upkeepNeeded, 
         bytes memory performData
     ) {
-        upkeepNeeded = _shouldTopUp();
+        (bool danger, uint256 collateralRatio, uint256 liquidationThreshold) = _checkCollateralSafety();
+        upkeepNeeded = danger;
+        if (danger) {
+            emit VaultPlugin__Danger(collateralRatio, liquidationThreshold);
+        }
         return (upkeepNeeded, performData);
     }
 
     /// @inheritdoc AutomationCompatibleInterface
     function performUpkeep(bytes calldata /* performData */) external override {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if (_shouldTopUp()) {
+        (bool danger, , ) = _checkCollateralSafety();
+        if (danger) {
             _topUpToMaintainCollateralRatio($.autoTopUpConfig.customConfig.autoTopUpThreshold);
         }
     }
@@ -413,18 +418,6 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         if (collateralRatio < autoTopUpThreshold) {
             danger = true;
         }
-    }
-
-    function _shouldTopUp() private returns (bool) {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if ($.autoTopUpConfig.customConfig.autoTopUpEnabled) {
-            (bool danger, uint256 collateralRatio, uint256 liquidationThreshold) = _checkCollateralSafety();
-            if (danger) {
-                emit VaultPlugin__Danger(collateralRatio, liquidationThreshold);
-                return true;
-            }
-        }
-        return false;
     }
 
     function _topUpCollateral(address collateralAddress, uint256 amount) private {
