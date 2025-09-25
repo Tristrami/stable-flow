@@ -97,7 +97,6 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     struct VaultPluginStorage {
         mapping(address collateral => address priceFeed) supportedCollaterals; // Supported collateral and its price feed
         ISFEngine sfEngine; // SFEngine
-        ISFAccount sfAccount; // SFAccount
         address sfTokenAddress; // The SF Token contract address
         address entryPointAddress; // The address of entry point address
         uint256 customCollateralRatio; // The collateral ration used to invest, must be greater than or equal to the minimum collateral ratio supported by SFEngine
@@ -146,7 +145,6 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         address[] memory collaterals,
         address[] memory priceFeeds,
         ISFEngine sfEngine,
-        ISFAccount sfAccount,
         address sfTokenAddress,
         address entryPointAddress,
         uint256 customCollateralRatio,
@@ -155,7 +153,6 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         _updateSupportedCollaterals(collaterals, priceFeeds);
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         $.sfEngine = sfEngine;
-        $.sfAccount = sfAccount;
         $.sfTokenAddress = sfTokenAddress;
         $.entryPointAddress = entryPointAddress;
         $.customCollateralRatio = customCollateralRatio;
@@ -211,7 +208,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
             amountCollateralToRedeem,
             $.customCollateralRatio
         );
-        uint256 sfBalance = $.sfAccount.balance();
+        uint256 sfBalance = ISFAccount(address(this)).balance();
         if (amountSFToBurn > sfBalance) {
             revert VaultPlugin__InsufficientBalance(address(0), sfBalance, amountSFToBurn);
         }
@@ -233,7 +230,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         requireSupportedCollateral(collateralAddress)
     {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        uint256 sfBalance = $.sfAccount.balance();
+        uint256 sfBalance = ISFAccount(address(this)).balance();
         if (debtToCover > sfBalance) {
             revert VaultPlugin__InsufficientBalance(address(0), sfBalance, debtToCover);
         }
@@ -292,7 +289,11 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
             emit VaultPlugin__AddNewCollateral(collateralAddress);
         }
         emit VaultPlugin__Deposit(collateralAddress, amount);
-        bool success = IERC20(collateralAddress).transferFrom($.sfAccount.getOwner(), address(this), amount);
+        bool success = IERC20(collateralAddress).transferFrom(
+            ISFAccount(address(this)).getOwner(), 
+            address(this), 
+            amount
+        );
         if (!success) {
             revert VaultPlugin__TransferFailed();
         }
@@ -315,7 +316,12 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
             if (amount == type(uint256).max) {
                 amount = getCollateralBalance(collateralAddress);
             } else {
-                revert VaultPlugin__InsufficientCollateral($.sfAccount.getOwner(), collateralAddress, collateralBalance, amount);
+                revert VaultPlugin__InsufficientCollateral(
+                    ISFAccount(address(this)).getOwner(), 
+                    collateralAddress, 
+                    collateralBalance, 
+                    amount
+                );
             }
         }
         if (amount == collateralBalance) {
@@ -325,7 +331,10 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
             }
         }
         emit VaultPlugin__Withdraw(collateralAddress, amount);
-        bool success = IERC20(collateralAddress).transfer($.sfAccount.getOwner(), amount);
+        bool success = IERC20(collateralAddress).transfer(
+            ISFAccount(address(this)).getOwner(), 
+            amount
+        );
         if (!success) {
             revert VaultPlugin__TransferFailed();
         }
@@ -478,8 +487,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     }
 
     function _getCollateralBalance(address collateralAddress) private view returns (uint256) {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        return IERC20(collateralAddress).balanceOf(address($.sfAccount));
+        return IERC20(collateralAddress).balanceOf(address(this));
     }
 
     function _updateCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) private {
@@ -506,8 +514,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     }
 
     function _requireNotFrozen() private view {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if ($.sfAccount.isFrozen()) {
+        if (ISFAccount(address(this)).isFrozen()) {
             revert VaultPlugin__AccountIsFrozen();
         }
     }
