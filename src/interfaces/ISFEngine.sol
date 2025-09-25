@@ -5,25 +5,25 @@ interface ISFEngine {
     
     /**
      * @dev Deposit collateral token and mint sf token
-     * @param collateralTokenAddress The address of collateral token contract
+     * @param collateralAddress The address of collateral contract
      * @param amountCollateral The amount of collateral token
      * @param amountSFToMint The amount of sf token to mint
      * @notice This will revert if the MINIMUM_COLLATERAL_RATIO is not met
      */
     function depositCollateralAndMintSFToken(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateral,
         uint256 amountSFToMint
     ) external;
 
     /**
      * @dev Redeem collateral and burn sf token
-     * @param collateralTokenAddress The address of collateral token contract
+     * @param collateralAddress The address of collateral contract
      * @param amountCollateralToRedeem The amount of collateral token
      * @param amountSFToBurn The amount of sf token to burn
      */
     function redeemCollateral(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateralToRedeem,
         uint256 amountSFToBurn
     ) external;
@@ -31,19 +31,26 @@ interface ISFEngine {
     /**
      * @dev Liquidate user's collateral when collateral ratio is less than MINIMUM_COLLATERAL_RATIO
      * @param user The account address of user whose collateral ratio is less than MINIMUM_COLLATERAL_RATIO
-     * @param collateralTokenAddress The address of collateral token contract
+     * @param collateralAddress The address of collateral contract
      * @param debtToCover The amount of debt (sf token) to cover
      */
-    function liquidate(address user, address collateralTokenAddress, uint256 debtToCover) external;
+    function liquidate(address user, address collateralAddress, uint256 debtToCover) external;
+
+    /**
+     * @dev Get user's SFToken debt
+     * @param user The account address of user
+     * @return debt The remaining debt
+     */
+    function getSFDebt(address user) external view returns (uint256);
 
     /**
      * @dev Calculate the amount of SFToken based on the minimum collateral ratio
-     * @param collateralTokenAddress The address of collateral token contract
+     * @param collateralAddress The address of collateral contract
      * @param amountCollateral The amount of collateral token
      * @return amountSFToken The amount of SFToken
      */
     function calculateSFTokensByCollateral(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateral,
         uint256 collateralRatio
     ) external view returns (uint256);

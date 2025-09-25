@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {IRecoverable} from "./IRecoverable.sol";
-import {IVault} from "./IVault.sol";
+import {ISocialRecoveryPlugin} from "./ISocialRecoveryPlugin.sol";
+import {IVaultPlugin} from "./IVaultPlugin.sol";
 
-interface ISFAccount is IRecoverable, IVault {
+interface ISFAccount is ISocialRecoveryPlugin, IVaultPlugin {
+
+    function getOwner() external view returns (address);
+
+    function debt() external view returns (uint256);
 
     function balance() external view returns (uint256);
 

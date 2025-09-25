@@ -4,13 +4,17 @@ pragma solidity ^0.8.30;
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
 import {SFToken} from "./SFToken.sol";
 import {Validator} from "./Validator.sol";
+import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IERC20} from "@openzeppelin/contracts/token/erc20/IERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
-contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
+contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
+
+    using ERC165Checker for address;
 
     /* -------------------------------------------------------------------------- */
     /*                                  Constants                                 */
@@ -31,7 +35,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     EnumerableSet.AddressSet private s_supportedTokenAddressSet;
     mapping(address user => mapping(address tokenAddress => uint256 value)) private s_collaterals;
     mapping(address tokenAddress => address priceFeedAddress) private s_priceFeeds;
-    mapping(address user => uint256 sfTokenMinted) private s_sfTokenMinted;
+    mapping(address user => uint256 sfDebt) private s_sfDebts;
 
     /* -------------------------------------------------------------------------- */
     /*                                  Libraries                                 */
@@ -45,10 +49,10 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     /* -------------------------------------------------------------------------- */
 
     event SFEngine__CollateralDeposited(
-        address indexed user, address indexed collateralTokenAddress, uint256 indexed amountCollateral
+        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
     event SFEngine__CollateralRedeemed(
-        address indexed user, address indexed collateralTokenAddress, uint256 indexed amountCollateral
+        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
     event SFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
 
@@ -65,6 +69,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     error SFEngine__SFToBurnExceedsUserDebt(uint256 userDebt);
     error SFEngine__CollateralRatioIsBroken(address user, uint256 collateralRatio);
     error SFEngine__CollateralRatioIsNotBroken(address user, uint256 collateralRatio);
+    error SFEngine__IncompatibleImplementation();
 
     /* -------------------------------------------------------------------------- */
     /*                                  Modifiers                                 */
@@ -97,50 +102,50 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     /* -------------------------------------------------------------------------- */
 
     function depositCollateralAndMintSFToken(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateral,
         uint256 amountSFToMint
     )
         external
         override
-        notZeroAddress(collateralTokenAddress)
+        notZeroAddress(collateralAddress)
         notZeroValue(amountCollateral)
-        onlySupportedToken(collateralTokenAddress)
+        onlySupportedToken(collateralAddress)
     {
-        _depositCollateral(collateralTokenAddress, amountCollateral);
+        _depositCollateral(collateralAddress, amountCollateral);
         _mintSFToken(amountSFToMint);
     }
 
     function redeemCollateral(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateralToRedeem,
         uint256 amountSFToBurn
     )
         public
         override
-        notZeroAddress(collateralTokenAddress)
+        notZeroAddress(collateralAddress)
         notZeroValue(amountCollateralToRedeem)
-        onlySupportedToken(collateralTokenAddress)
+        onlySupportedToken(collateralAddress)
     {
         _burnSFToken(msg.sender, msg.sender, amountSFToBurn, amountSFToBurn);
-        _redeemCollateral(collateralTokenAddress, amountCollateralToRedeem, msg.sender, msg.sender);
+        _redeemCollateral(collateralAddress, amountCollateralToRedeem, msg.sender, msg.sender);
         _revertIfCollateralRatioIsBroken(msg.sender);
     }
 
-    function liquidate(address user, address collateralTokenAddress, uint256 debtToCover)
+    function liquidate(address user, address collateralAddress, uint256 debtToCover)
         external
         override
-        notZeroAddress(collateralTokenAddress)
+        notZeroAddress(collateralAddress)
         notZeroValue(debtToCover)
-        onlySupportedToken(collateralTokenAddress)
+        onlySupportedToken(collateralAddress)
     {
         _revertIfCollateralRatioIsNotBroken(user);
         uint256 liquidatorBalance = s_sfToken.balanceOf(msg.sender);
         if (debtToCover > liquidatorBalance) {
             debtToCover = liquidatorBalance;
         }
-        uint256 amountCollateralToLiquidate = _getTokenAmountFromUsd(collateralTokenAddress, debtToCover);
-        uint256 amountDeposited = s_collaterals[user][collateralTokenAddress];
+        uint256 amountCollateralToLiquidate = _getTokenAmountFromUsd(collateralAddress, debtToCover);
+        uint256 amountDeposited = s_collaterals[user][collateralAddress];
         if (amountCollateralToLiquidate > amountDeposited) {
             amountCollateralToLiquidate = amountDeposited;
         }
@@ -153,23 +158,27 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
             // give all the collateral to liquidator, and subtract the bonus
             // on amount of sf token to burn
             amountCollateralToLiquidate = amountDeposited;
-            uint256 bonusInSFToken = _getTokenValueInUsd(collateralTokenAddress, bonus);
+            uint256 bonusInSFToken = _getTokenValueInUsd(collateralAddress, bonus);
             amountSFToBurn -= bonusInSFToken;
         } else {
             amountCollateralToLiquidate += bonus;
         }
         _burnSFToken(msg.sender, user, amountSFToBurn, debtToCover);
-        _redeemCollateral(collateralTokenAddress, amountCollateralToLiquidate, user, msg.sender);
+        _redeemCollateral(collateralAddress, amountCollateralToLiquidate, user, msg.sender);
         _revertIfCollateralRatioIsBroken(user);
         _revertIfCollateralRatioIsBroken(msg.sender);
     }
 
+    function getSFDebt(address user) external view override returns (uint256) {
+        return s_sfDebts[user];
+    }
+
     function calculateSFTokensByCollateral(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateral,
         uint256 collateralRatio
     ) external view override returns (uint256) {
-        uint256 collateralInUsd = _getTokenValueInUsd(collateralTokenAddress, amountCollateral);
+        uint256 collateralInUsd = _getTokenValueInUsd(collateralAddress, amountCollateral);
         return collateralInUsd * collateralRatio / PRECISION_FACTOR;
     }
 
@@ -184,8 +193,8 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     }
 
     function getCollateralRatio(address user) public view override returns (uint256) {
-        uint256 sfMinted = s_sfTokenMinted[user];
-        if (sfMinted == 0) {
+        uint256 sfDebt = s_sfDebts[user];
+        if (sfDebt == 0) {
             return type(uint256).max;
         }
         uint256 totalCollateralValueInUsd;
@@ -194,7 +203,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
             uint256 amountCollateral = s_collaterals[user][tokenAddress];
             totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
         }
-        return totalCollateralValueInUsd * PRECISION_FACTOR / sfMinted;
+        return totalCollateralValueInUsd * PRECISION_FACTOR / sfDebt;
     }
 
     function getMinimumCollateralRatio() public pure override returns (uint256) {
@@ -203,6 +212,11 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
 
     function getSFTokenAddress() public view override returns (address) {
         return address(s_sfToken);
+    }
+
+    /// @inheritdoc ERC165
+    function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
+        return interfaceId == type(ISFEngine).interfaceId || super.supportsInterface(interfaceId);
     }
 
     /* -------------------------------------------------------------------------- */
@@ -221,13 +235,13 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
 
     /**
      * @dev Deposit collateral token
-     * @param collateralTokenAddress The address of collateral token contract
+     * @param collateralAddress The address of collateral contract
      * @param amountCollateral The amount of collateral token
      */
-    function _depositCollateral(address collateralTokenAddress, uint256 amountCollateral) private {
-        s_collaterals[msg.sender][collateralTokenAddress] += amountCollateral;
-        emit SFEngine__CollateralDeposited(msg.sender, collateralTokenAddress, amountCollateral);
-        bool success = IERC20(collateralTokenAddress).transferFrom(msg.sender, address(this), amountCollateral);
+    function _depositCollateral(address collateralAddress, uint256 amountCollateral) private {
+        s_collaterals[msg.sender][collateralAddress] += amountCollateral;
+        emit SFEngine__CollateralDeposited(msg.sender, collateralAddress, amountCollateral);
+        bool success = IERC20(collateralAddress).transferFrom(msg.sender, address(this), amountCollateral);
         if (!success) {
             revert SFEngine__TransferFailed();
         }
@@ -241,7 +255,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
         if (amount == 0) {
             return;
         }
-        s_sfTokenMinted[msg.sender] += amount;
+        s_sfDebts[msg.sender] += amount;
         _revertIfCollateralRatioIsBroken(msg.sender);
         emit SFEngine__SFTokenMinted(msg.sender, amount);
         s_sfToken.mint(msg.sender, amount);
@@ -306,11 +320,11 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
         if (balance < amountToBurn) {
             revert SFEngine__InsufficientBalance(balance);
         }
-        uint256 userSFMinted = s_sfTokenMinted[onBehalfOf];
-        if (userSFMinted < debtToCover) {
-            revert SFEngine__SFToBurnExceedsUserDebt(userSFMinted);
+        uint256 userSFDebt = s_sfDebts[onBehalfOf];
+        if (userSFDebt < debtToCover) {
+            revert SFEngine__SFToBurnExceedsUserDebt(userSFDebt);
         }
-        s_sfTokenMinted[onBehalfOf] -= debtToCover;
+        s_sfDebts[onBehalfOf] -= debtToCover;
         bool success = s_sfToken.transferFrom(from, address(this), amountToBurn);
         if (!success) {
             revert SFEngine__TransferFailed();
@@ -320,24 +334,24 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
 
     /**
      * @dev Redeem collateral
-     * @param collateralTokenAddress The address of collateral token contract
+     * @param collateralAddress The address of collateral contract
      * @param amountCollateralToRedeem The amount of collateral to redeem, 18 decimals
      * @param collateralFrom The account address where the collateral token comes from
      * @param collateralTo The account address where the collateral token will be transfer to
      */
     function _redeemCollateral(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateralToRedeem,
         address collateralFrom,
         address collateralTo
     ) private {
-        uint256 collateralDeposited = s_collaterals[collateralFrom][collateralTokenAddress];
+        uint256 collateralDeposited = s_collaterals[collateralFrom][collateralAddress];
         if (collateralDeposited < amountCollateralToRedeem) {
             revert SFEngine__AmountToRedeemExceedsDeposited(collateralDeposited);
         }
-        s_collaterals[collateralFrom][collateralTokenAddress] -= amountCollateralToRedeem;
-        emit SFEngine__CollateralRedeemed(collateralFrom, collateralTokenAddress, amountCollateralToRedeem);
-        bool success = IERC20(collateralTokenAddress).transfer(collateralTo, amountCollateralToRedeem);
+        s_collaterals[collateralFrom][collateralAddress] -= amountCollateralToRedeem;
+        emit SFEngine__CollateralRedeemed(collateralFrom, collateralAddress, amountCollateralToRedeem);
+        bool success = IERC20(collateralAddress).transfer(collateralTo, amountCollateralToRedeem);
         if (!success) {
             revert SFEngine__TransferFailed();
         }
@@ -375,20 +389,18 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable {
     /*                        Overridden Internal Functions                       */
     /* -------------------------------------------------------------------------- */
     
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {
-
+    function _authorizeUpgrade(address newImplementation) internal view override onlyOwner {
+        if (!newImplementation.supportsInterface(type(ISFEngine).interfaceId)) {
+            revert SFEngine__IncompatibleImplementation();
+        }
     }
 
     /* -------------------------------------------------------------------------- */
     /*                           Getter / View Functions                          */
     /* -------------------------------------------------------------------------- */
 
-    function getCollateralAmount(address user, address collateralTokenAddress) public view returns (uint256) {
-        return s_collaterals[user][collateralTokenAddress];
-    }
-
-    function getSFTokenMinted(address user) public view returns (uint256) {
-        return s_sfTokenMinted[user];
+    function getCollateralAmount(address user, address collateralAddress) public view returns (uint256) {
+        return s_collaterals[user][collateralAddress];
     }
 
     function getCollateralTokenAddresses() public view returns (address[] memory) {

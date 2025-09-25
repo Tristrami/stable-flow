@@ -6,4 +6,4 @@
    1. 在链 B 铸造稳定币
 1. 使用 Beacon 模式部署 `SFAccount`
    1. 代理合约：`BeaconProxy`
-   1. Beacon 合约：`BeaconUpgradeable`
+   1. Beacon 合约：`UpgradeableBeacon`

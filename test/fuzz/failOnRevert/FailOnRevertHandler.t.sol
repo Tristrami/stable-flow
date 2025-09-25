@@ -24,8 +24,8 @@ contract FailOnRevertHandler is Test {
         sfEngine.getCollateralAmount(user, collateralTokenAddress);
     }
 
-    function getSFTokenMinted(address user) public {
-        sfEngine.getSFTokenMinted(user);
+    function getSFDebt(address user) public {
+        sfEngine.getSFDebt(user);
     }
 
     function getSFTokenAddress() public {

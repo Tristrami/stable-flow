@@ -228,13 +228,13 @@ contract SFEngineTest is Test, Constants {
             getAmountSFToMint(deployConfig.wethTokenAddress, amountCollateralLeft, DEFAULT_COLLATERAL_RATIO);
         console2.log("maximumAmountSFToHold:", maximumAmountSFToHold);
         // The minimum amount of sf that it is supposed to burn to maintain the collateral ratio
-        uint256 minimumAmountSFToBurn = sfEngine.getSFTokenMinted(user) - maximumAmountSFToHold;
+        uint256 minimumAmountSFToBurn = sfEngine.getSFDebt(user) - maximumAmountSFToHold;
         console2.log("minimumAmountSFToBurn:", minimumAmountSFToBurn);
         // Burn half of the minimum amount of sf
         uint256 amountSFToBurn = minimumAmountSFToBurn / 2;
         console2.log("amountSFToBurn:", amountSFToBurn);
         // Calculate expected collateral ratio after redeem
-        uint256 amountSFLeft = sfEngine.getSFTokenMinted(user) - amountSFToBurn;
+        uint256 amountSFLeft = sfEngine.getSFDebt(user) - amountSFToBurn;
         console2.log("amountSFLeft:", amountSFLeft);
         uint256 amountCollateralLeftInUsd =
             sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, amountCollateralLeft);
@@ -260,7 +260,7 @@ contract SFEngineTest is Test, Constants {
 
         // Starting data
         uint256 startingAmountDeposited = sfEngine.getCollateralAmount(user, address(weth));
-        uint256 startingAmountMinted = sfEngine.getSFTokenMinted(user);
+        uint256 startingAmountMinted = sfEngine.getSFDebt(user);
 
         // Prepare redeem data
         uint256 amountCollateralToRedeem = DEFAULT_AMOUNT_COLLATERAL / 2;
@@ -273,10 +273,10 @@ contract SFEngineTest is Test, Constants {
             getAmountSFToMint(deployConfig.wethTokenAddress, amountCollateralLeft, DEFAULT_COLLATERAL_RATIO);
         console2.log("maximumAmountSFToHold:", maximumAmountSFToHold);
         // The minimum amount of sf that it is supposed to burn to maintain the collateral ratio
-        uint256 minimumAmountSFToBurn = sfEngine.getSFTokenMinted(user) - maximumAmountSFToHold;
+        uint256 minimumAmountSFToBurn = sfEngine.getSFDebt(user) - maximumAmountSFToHold;
         console2.log("minimumAmountSFToBurn:", minimumAmountSFToBurn);
         // Calculate expected collateral ratio after redeem
-        uint256 amountSFLeft = sfEngine.getSFTokenMinted(user) - minimumAmountSFToBurn;
+        uint256 amountSFLeft = sfEngine.getSFDebt(user) - minimumAmountSFToBurn;
         console2.log("amountSFLeft:", amountSFLeft);
         uint256 amountCollateralLeftInUsd =
             sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, amountCollateralLeft);
@@ -298,7 +298,7 @@ contract SFEngineTest is Test, Constants {
 
         // Ending data
         uint256 endingAmountDeposited = sfEngine.getCollateralAmount(user, address(weth));
-        uint256 endingAmountMinted = sfEngine.getSFTokenMinted(user);
+        uint256 endingAmountMinted = sfEngine.getSFDebt(user);
 
         // Check balance
         assertEq(endingUserWethBalance, startingUserWethBalance + amountCollateralToRedeem);
@@ -343,7 +343,7 @@ contract SFEngineTest is Test, Constants {
         sfEngine.depositCollateralAndMintSFToken(
             deployConfig.wethTokenAddress, 
             LIQUIDATOR_DEPOSIT_AMOUNT, 
-            sfEngine.getSFTokenMinted(user)
+            sfEngine.getSFDebt(user)
         );
 
         // Starting balance
@@ -352,7 +352,7 @@ contract SFEngineTest is Test, Constants {
         uint256 startingEngineWethBalance = weth.balanceOf(address(sfEngine));
 
         // Starting data
-        uint256 startingUserAmountMinted = sfEngine.getSFTokenMinted(user);
+        uint256 startingUserAmountMinted = sfEngine.getSFDebt(user);
         uint256 startingUserAmountDeposited = sfEngine.getCollateralAmount(user, address(weth));
         uint256 startingLiquidatorAmountDeposited = sfEngine.getCollateralAmount(liquidator, address(weth));
 
@@ -374,7 +374,7 @@ contract SFEngineTest is Test, Constants {
         // Ending data
         uint256 endingUserAmountDeposited = sfEngine.getCollateralAmount(user, address(weth));
         uint256 endingLiquidatorAmountDeposited = sfEngine.getCollateralAmount(liquidator, address(weth));
-        uint256 endingUserAmountMinted = sfEngine.getSFTokenMinted(user);
+        uint256 endingUserAmountMinted = sfEngine.getSFDebt(user);
 
         // Check balance
         uint256 amountCollateralToLiquidate = sfEngine.getTokenAmountFromUsd(deployConfig.wethTokenAddress, debtToCover);
@@ -396,7 +396,7 @@ contract SFEngineTest is Test, Constants {
     {
         ERC20Mock weth = ERC20Mock(deployConfig.wethTokenAddress);
         address liquidator = makeAddr("liquidator");
-        uint256 debtToCover = sfEngine.getSFTokenMinted(user);
+        uint256 debtToCover = sfEngine.getSFDebt(user);
         weth.mint(liquidator, LIQUIDATOR_DEPOSIT_AMOUNT);
         // Deposit enough eth to protocol to make sure liquidation won't break liquidator's collateral ratio
         vm.startPrank(liquidator);
@@ -404,7 +404,7 @@ contract SFEngineTest is Test, Constants {
         sfEngine.depositCollateralAndMintSFToken(
             deployConfig.wethTokenAddress, 
             LIQUIDATOR_DEPOSIT_AMOUNT, 
-            sfEngine.getSFTokenMinted(user)
+            sfEngine.getSFDebt(user)
         );
 
         // Starting balance
@@ -435,7 +435,7 @@ contract SFEngineTest is Test, Constants {
         // Ending data
         uint256 endingUserAmountDeposited = sfEngine.getCollateralAmount(user, address(weth));
         uint256 endingLiquidatorAmountDeposited = sfEngine.getCollateralAmount(liquidator, address(weth));
-        uint256 endingUserAmountMinted = sfEngine.getSFTokenMinted(user);
+        uint256 endingUserAmountMinted = sfEngine.getSFDebt(user);
 
         // Check balance
         uint256 amountCollateralToLiquidate = sfEngine.getTokenAmountFromUsd(deployConfig.wethTokenAddress, debtToCover);
@@ -466,5 +466,10 @@ contract SFEngineTest is Test, Constants {
         returns (uint256)
     {
         return number * 10 ** (precision - decimals);
+    }
+
+    function testS() public {
+        bytes32 b = keccak256(abi.encode(uint256(keccak256("stableflow.storage.VaultPlugin")) - 1)) & ~bytes32(uint256(0xff));
+        console2.logBytes32(b);
     }
 }

@@ -2,34 +2,37 @@
 pragma solidity ^0.8.30;
 
 import {ISFAccount} from "../interfaces/ISFAccount.sol";
-import {IRecoverable} from "../interfaces/IRecoverable.sol";
-import {IVault} from "../interfaces/IVault.sol";
+import {ISocialRecoveryPlugin} from "../interfaces/ISocialRecoveryPlugin.sol";
+import {IVaultPlugin} from "../interfaces/IVaultPlugin.sol";
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
+import {AddressArrays} from "../libraries/AddressArrays.sol";
+import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
 import {BaseAccount} from "account-abstraction/contracts/core/BaseAccount.sol";
+import {SIG_VALIDATION_SUCCESS, SIG_VALIDATION_FAILED} from "account-abstraction/contracts/core/Helpers.sol";
 import {IEntryPoint} from "account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {PackedUserOperation} from "account-abstraction/contracts/interfaces/PackedUserOperation.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
-import {Arrays} from "@openzeppelin/contracts/utils/Arrays.sol";
+import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
-import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
 
 contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgradeable, AccessControlUpgradeable, ERC165 {
 
+    using AddressArrays for address[];
     using OracleLib for AggregatorV3Interface;
     using EnumerableSet for EnumerableSet.AddressSet;
     using ERC165Checker for address;
-    using Arrays for address[];
 
     /* -------------------------------------------------------------------------- */
     /*                                   Errors                                   */
     /* -------------------------------------------------------------------------- */
 
+    error SFAccount__NotFromFactory();
     error SFAccount__OperationNotSupported();
     error SFAccount__CollateralNotSupported(address collateral);
     error SFAccount__MismatchBetweenCollateralAndPriceFeeds(
@@ -43,8 +46,17 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         uint256 targetCollateralRatio
     );
     error SFAccount__SocialRecoveryNotSupported();
+    error SFAccount__SocialRecoveryIsAlreadyDisabled();
+    error SFAccount__SocialRecoveryIsAlreadyEnabled();
+    error SFAccount__ApprovalExceedsGuardianAmount(uint256 approvals, uint256 numGuardians);
+    error SFAccount__AccountIsInRecoveryProcess();
+    error SFAccount__NoGuardianSet();
+    error SFAccount__MinGuardianApprovalsIsNotSet();
+    error SFAccount__MinGuardianApprovalsCanNotBeZero();
     error SFAccount__OnlyGuardian();
     error SFAccount__TooManyGuardians(uint256 maxGuardians);
+    error SFAccount__GuardianAlreadyExists(address guardian);
+    error SFAccount__GuardianNotExists(address guardian);
     error SfAccount__NotSFAccount(address account);
     error SFAccount__NoPendingRecovery();
     error SFAccount__InsufficientApprovals(uint256 currentApprovals, uint256 requiredApprovals);
@@ -55,7 +67,7 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     error SFAccount__TransferFailed();
     error SFAccount__InsufficientCollateral(
         address receiver, 
-        address collateralTokenAddress, 
+        address collateralAddress, 
         uint256 balance, 
         uint256 required
     );
@@ -69,18 +81,18 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
 
     event SFAccount__CollateralAndPriceFeedUpdated(uint256 indexed numCollateral);
     event SFAccount__Invest(
-        address indexed collateralTokenAddress, 
+        address indexed collateralAddress, 
         uint256 indexed amountCollateral, 
         uint256 indexed sfToMint
     );
     event SFAccount__Harvest(
-        address indexed collateralTokenAddress, 
+        address indexed collateralAddress, 
         uint256 indexed amountCollateral, 
         uint256 indexed sfToBurn
     );
     event SFAccount__Liquidate(
         address indexed account, 
-        address indexed collateralTokenAddress, 
+        address indexed collateralAddress, 
         uint256 indexed debtToCover
     );
     event SFAccount__Danger(
@@ -88,7 +100,7 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         uint256 indexed liquidatingCollateralRatio
     );
     event SFAccount__TopUpCollateral(
-        address indexed collateralTokenAddress, 
+        address indexed collateralAddress, 
         uint256 indexed amountCollateral
     );
     event SFAccount__CollateralRatioMaintained(
@@ -100,39 +112,23 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         uint256 indexed currentCollateralRatio, 
         uint256 indexed targetCollateralRatio
     );
-    event SFAccount__UpdateAutoTopUpSupport(bool indexed enabled);
-    event SFAccount__UpdateSocialRecoverySupport(bool indexed enabled);
-    event SFAccount__GuardianAdded(address indexed guardian);
-    event SFAccount__GuardianRemoved(address indexed guardian);
+    event SFAccount__UpdateCustomRecoveryConfig(bool indexed enabled, bytes configData);
+    event SFAccount__UpdateCustomAutoTopUpConfig(bool indexed enabled, bytes configData);
     event SFAccount__CustomCollateralRatioUpdated(uint256 indexed collateralRatio);
-    event SFAccount__MaxGuardiansUpdated(uint8 indexed maxGuardians);
-    event SFAccount__MinGuardianApprovalsUpdated(uint8 indexed minGuardianApprovals);
-    event SFAccount__RecoveryTimeLockUpdated(uint256 indexed recoveryTimeLock);
     event SFAccount__RecoveryInitiated(address indexed newOwner);
     event SFAccount__RecoveryApproved(address indexed guardian);
     event SFAccount__RecoveryCancelled(address indexed guardian);
     event SFAccount__RecoveryCompleted(address indexed previousOwner, address indexed newOwner);
-    event SFAccount__Deposit(address indexed collateralTokenAddress, uint256 indexed amount);
-    event SFAccount__Withdraw(address indexed collateralTokenAddress, uint256 indexed amount);
-    event SFAccount__AddNewCollateral(address indexed collateralTokenAddress);
-    event SFAccount__RemoveCollateral(address indexed collateralTokenAddress);
+    event SFAccount__Deposit(address indexed collateralAddress, uint256 indexed amount);
+    event SFAccount__Withdraw(address indexed collateralAddress, uint256 indexed amount);
+    event SFAccount__AddNewCollateral(address indexed collateralAddress);
+    event SFAccount__RemoveCollateral(address indexed collateralAddress);
     event SFAccount__AccountFreezed(address indexed freezedBy);
     event SFAccount__AccountUnfreezed(address indexed unfreezedBy);
 
     /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
-
-    struct RecoveryRecord {
-        bool isCompleted;
-        bool isCancelled;
-        address cancelledBy;
-        address previousOwner;
-        address newOwner;
-        uint256 totalGuardians;
-        address[] approvedGuardians;
-        uint256 executableTime;
-    }
 
     struct FreezeRecord {
         address freezedBy;
@@ -153,6 +149,10 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     /*                               State Variables                              */
     /* -------------------------------------------------------------------------- */
 
+    /// @dev Social recovery config
+    RecoveryConfig private recoveryConfig;
+    /// @dev Auto top up config
+    AutoTopUpConfig private autoTopUpConfig;
     /// @dev Supported collateral and its price feed
     mapping(address collateral => address priceFeed) private supportedCollaterals;
     /// @dev The sfEngine contract used to interact with protocol
@@ -167,18 +167,6 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     EnumerableSet.AddressSet private depositedCollaterals;
     /// @dev The collateral ration used to invest, must be greater than or equal to the minimum collateral ratio supported by SFEngine
     uint256 private customCollateralRatio;
-    /// @dev Whether this account supports collateral auto top up
-    bool private autoTopUpEnabled;
-    /// @dev Whether this account supports social recovery
-    bool private socialRecoveryEnabled;
-    /// @dev Max number of guardians that can be added
-    uint8 private maxGuardians;
-    /// @dev Minimum amount of guardian approvals needed to recover the current account
-    uint8 private minGuardianApprovals;
-    /// @dev Guardian addresses for social recovery
-    EnumerableSet.AddressSet private guardians;
-    /// @dev Social recovery time lock, recovery can only be executed after a delay
-    uint256 private recoveryTimeLock;
     /// @dev The recovery records of current account
     RecoveryRecord[] private recoveryRecords;
     /// @dev Whether this account is frozen
@@ -197,6 +185,11 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
 
     modifier requireSupportedCollateral(address collateral) {
         _requireSupportedCollateral(collateral);
+        _;
+    }
+
+    modifier notRecovering() {
+        _requireNotRecovering();
         _;
     }
 
@@ -232,37 +225,29 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     /* -------------------------------------------------------------------------- */
 
     function initialize(
-        address[] memory collaterals,
-        address[] memory priceFeeds,
+        address _accountOwner,
+        address[] memory _collaterals,
+        address[] memory _priceFeeds,
         uint256 _customCollateralRatio,
-        bool _autoTopUpEnabled,
-        bool _socialRecoveryEnabled,
-        address[] memory _guardians, 
-        uint8 _maxGuardians, 
-        uint8 _minGuardianApprovals,
-        uint256 _recoveryTimeLock,
         address _entryPointAddress,
         address _sfEngineAddress,
-        address _accountFactoryAddress
+        address _accountFactoryAddress,
+        AutoTopUpConfig memory _autoTopUpConfig,
+        RecoveryConfig memory _recoveryConfig
     ) external initializer {
         // Upgradeable init
         __AccessControl_init();
-        __Ownable_init(msg.sender);
+        __Ownable_init(_accountOwner);
         // State variable init
-        _updateSupportedCollaterals(collaterals, priceFeeds);
+        _updateSupportedCollaterals(_collaterals, _priceFeeds);
         _updateCustomCollateralRatio(_customCollateralRatio);
-        _updateAutoTopUpSupport(_autoTopUpEnabled);
-        _updateSocialRecoverySupport(_socialRecoveryEnabled);
-        _updateMaxGuardians(_maxGuardians);
-        _updateMinGuardianApprovals(_minGuardianApprovals);
-        _updateRecoveryTimeLock(_recoveryTimeLock);
-        _initializeGuardians(_guardians, _maxGuardians);
+        autoTopUpConfig = _autoTopUpConfig;
+        recoveryConfig = _recoveryConfig;
         entryPointAddress = _entryPointAddress;
         sfEngine = ISFEngine(_sfEngineAddress);
         sfTokenAddress = sfEngine.getSFTokenAddress();
         accountFactoryAddress = _accountFactoryAddress;
         frozen = false;
-        socialRecoveryEnabled = false;
     }
 
     function reinitialize(
@@ -270,64 +255,60 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         address[] memory priceFeeds,
         uint256 _customCollateralRatio,
         uint64 _version, 
-        uint8 _maxGuardians,
-        uint8 _minGuardianApprovals,
-        uint256 _recoveryTimeLock
+        uint8 _maxGuardians
     ) external reinitializer(_version) {
         _updateSupportedCollaterals(collaterals, priceFeeds);
         _updateCustomCollateralRatio(_customCollateralRatio);
-        _updateMaxGuardians(_maxGuardians);
-        _updateMinGuardianApprovals(_minGuardianApprovals);
-        _updateRecoveryTimeLock(_recoveryTimeLock);
+        recoveryConfig.maxGuardians = _maxGuardians;
     }
 
     /* -------------------------------------------------------------------------- */
     /*                         External / Public Functions                        */
     /* -------------------------------------------------------------------------- */
 
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function invest(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateral
     ) 
         external 
         override 
         onlyEntryPoint 
         notFrozen 
-        requireSupportedCollateral(collateralTokenAddress)
+        requireSupportedCollateral(collateralAddress)
     {
-        uint256 collateralBalance = _getCollateralBalance(collateralTokenAddress);
+        uint256 collateralBalance = _getCollateralBalance(collateralAddress);
         if (collateralBalance < amountCollateral) {
             revert SFAccount__InsufficientCollateral(
                 address(sfEngine), 
-                collateralTokenAddress, 
+                collateralAddress, 
                 collateralBalance, 
                 amountCollateral
             );
         }
         uint256 amountSFToMint = sfEngine.calculateSFTokensByCollateral(
-            collateralTokenAddress, 
+            collateralAddress, 
             amountCollateral,
             customCollateralRatio
         );
-        emit SFAccount__Invest(collateralTokenAddress, amountCollateral, amountSFToMint);
-        IERC20(collateralTokenAddress).approve(address(sfEngine), amountCollateral);
-        sfEngine.depositCollateralAndMintSFToken(collateralTokenAddress, amountCollateral, amountSFToMint);
+        emit SFAccount__Invest(collateralAddress, amountCollateral, amountSFToMint);
+        IERC20(collateralAddress).approve(address(sfEngine), amountCollateral);
+        sfEngine.depositCollateralAndMintSFToken(collateralAddress, amountCollateral, amountSFToMint);
     }
 
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function harvest(
-        address collateralTokenAddress,
+        address collateralAddress,
         uint256 amountCollateralToRedeem
     ) 
         external 
         override 
         onlyEntryPoint 
         notFrozen 
-        requireSupportedCollateral(collateralTokenAddress)
+        requireSupportedCollateral(collateralAddress)
     {
         uint256 amountSFToBurn = sfEngine.calculateSFTokensByCollateral(
-            collateralTokenAddress, 
+            collateralAddress, 
             amountCollateralToRedeem,
             customCollateralRatio
         );
@@ -335,14 +316,14 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         if (amountSFToBurn > sfBalance) {
             revert SFAccount__InsufficientBalance(address(0), sfBalance, amountSFToBurn);
         }
-        emit SFAccount__Harvest(collateralTokenAddress, amountCollateralToRedeem, amountSFToBurn);
-        sfEngine.redeemCollateral(collateralTokenAddress, amountCollateralToRedeem, amountSFToBurn);
+        emit SFAccount__Harvest(collateralAddress, amountCollateralToRedeem, amountSFToBurn);
+        sfEngine.redeemCollateral(collateralAddress, amountCollateralToRedeem, amountSFToBurn);
     }
 
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function liquidate(
         address account, 
-        address collateralTokenAddress, 
+        address collateralAddress, 
         uint256 debtToCover
     ) 
         external 
@@ -350,18 +331,28 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         onlyEntryPoint 
         notFrozen 
         onlySFAccount(account) 
-        requireSupportedCollateral(collateralTokenAddress)
+        requireSupportedCollateral(collateralAddress)
     {
         uint256 sfBalance = _getSFTokenBalance();
         if (debtToCover > sfBalance) {
             revert SFAccount__InsufficientBalance(address(0), sfBalance, debtToCover);
         }
-        emit SFAccount__Liquidate(account, collateralTokenAddress, debtToCover);
+        emit SFAccount__Liquidate(account, collateralAddress, debtToCover);
         IERC20(sfTokenAddress).approve(address(sfEngine), debtToCover);
-        sfEngine.liquidate(account, collateralTokenAddress, debtToCover);
+        sfEngine.liquidate(account, collateralAddress, debtToCover);
     }
 
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
+    function updateCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) external override onlyEntryPoint {
+        _updateCustomAutoTopUpConfig(customConfig);
+    }
+
+    /// @inheritdoc IVaultPlugin
+    function getCustomAutoTopUpConfig() external view override returns (CustomAutoTopUpConfig memory customConfig) {
+        return autoTopUpConfig.customConfig;
+    }
+
+    /// @inheritdoc IVaultPlugin
     function checkCollateralSafety() external view override returns (
         bool danger, 
         uint256 collateralRatio, 
@@ -370,91 +361,96 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         return _checkCollateralSafety();
     }
 
-    /// @inheritdoc IVault
-    function topUpCollateral(address collateralTokenAddress, uint256 amount)
+    /// @inheritdoc IVaultPlugin
+    function topUpCollateral(address collateralAddress, uint256 amount)
         external 
         override 
         onlyEntryPoint 
-        requireSupportedCollateral(collateralTokenAddress)
+        requireSupportedCollateral(collateralAddress)
     {
-        _topUpCollateral(collateralTokenAddress, amount);
+        _topUpCollateral(collateralAddress, amount);
     }
 
-    /// @inheritdoc IVault
-    function updateAutoTopUpSupport(bool enabled) external override onlyEntryPoint {
-        _updateAutoTopUpSupport(enabled);
-    }
-
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function deposit(
-        address collateralTokenAddress, 
+        address collateralAddress, 
         uint256 amount
     ) 
         external 
         override 
         onlyEntryPoint 
         notFrozen 
-        requireSupportedCollateral(collateralTokenAddress)
+        requireSupportedCollateral(collateralAddress)
     {
         if (amount == 0) {
             revert SFAccount__InvalidTokenAmount(amount);
         }
-        bool added = depositedCollaterals.add(collateralTokenAddress);
+        bool added = depositedCollaterals.add(collateralAddress);
         if (added) {
-            emit SFAccount__AddNewCollateral(collateralTokenAddress);
+            emit SFAccount__AddNewCollateral(collateralAddress);
         }
-        emit SFAccount__Deposit(collateralTokenAddress, amount);
-        bool success = IERC20(collateralTokenAddress).transferFrom(owner(), address(this), amount);
+        emit SFAccount__Deposit(collateralAddress, amount);
+        bool success = IERC20(collateralAddress).transferFrom(owner(), address(this), amount);
         if (!success) {
             revert SFAccount__TransferFailed();
         }
     }
 
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function withdraw(
-        address collateralTokenAddress, 
+        address collateralAddress, 
         uint256 amount
     ) external override onlyEntryPoint notFrozen {
-        if (collateralTokenAddress == address(0)) {
-            revert SFAccount__InvalidTokenAddress(collateralTokenAddress);
+        if (collateralAddress == address(0)) {
+            revert SFAccount__InvalidTokenAddress(collateralAddress);
         }
         if (amount == 0) {
             revert SFAccount__InvalidTokenAmount(amount);
         }
-        uint256 collateralBalance = getCollateralBalance(collateralTokenAddress);
+        uint256 collateralBalance = getCollateralBalance(collateralAddress);
         if (amount > collateralBalance) {
             if (amount == type(uint256).max) {
-                amount = getCollateralBalance(collateralTokenAddress);
+                amount = getCollateralBalance(collateralAddress);
             } else {
-                revert SFAccount__InsufficientCollateral(owner(), collateralTokenAddress, collateralBalance, amount);
+                revert SFAccount__InsufficientCollateral(owner(), collateralAddress, collateralBalance, amount);
             }
         }
         if (amount == collateralBalance) {
-            bool removed = depositedCollaterals.remove(collateralTokenAddress);
+            bool removed = depositedCollaterals.remove(collateralAddress);
             if (removed) {
-                emit SFAccount__RemoveCollateral(collateralTokenAddress);
+                emit SFAccount__RemoveCollateral(collateralAddress);
             }
         }
-        emit SFAccount__Withdraw(collateralTokenAddress, amount);
-        bool success = IERC20(collateralTokenAddress).transfer(owner(), amount);
+        emit SFAccount__Withdraw(collateralAddress, amount);
+        bool success = IERC20(collateralAddress).transfer(owner(), amount);
         if (!success) {
             revert SFAccount__TransferFailed();
         }
     }
 
-    /// @inheritdoc IVault
-    function getCollateralBalance(address collateralTokenAddress) public view override returns (uint256) {
-        return _getCollateralBalance(collateralTokenAddress);
+    /// @inheritdoc IVaultPlugin
+    function getCollateralBalance(address collateralAddress) public view override returns (uint256) {
+        return _getCollateralBalance(collateralAddress);
     }
 
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function getCustomCollateralRatio() external view override returns (uint256) {
         return customCollateralRatio;
     }
     
-    /// @inheritdoc IVault
+    /// @inheritdoc IVaultPlugin
     function getDepositedCollaterals() external view override returns (address[] memory) {
         return depositedCollaterals.values();
+    }
+
+    /// @inheritdoc ISFAccount
+    function getOwner() external view override returns (address) {
+        return owner();
+    }
+
+    /// @inheritdoc ISFAccount
+    function debt() external view override returns (uint256) {
+        return _getSFDebt();
     }
 
     /// @inheritdoc ISFAccount
@@ -473,17 +469,37 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         }
     }
 
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISFAccount
+    function freeze() external override onlyEntryPoint {
+        _freezeAccount(owner());
+    }
+
+    /// @inheritdoc ISFAccount
+    function unfreeze() external override onlyEntryPoint {
+        _unfreezeAccount(owner());
+    }
+
+    /// @inheritdoc ISFAccount
+    function isFrozen() external view override returns (bool) {
+        return frozen;
+    }
+
+    /// @inheritdoc ISocialRecoveryPlugin
     function supportsSocialRecovery() public view override returns (bool) {
-        return socialRecoveryEnabled;
+        return _supportsSocialRecovery();
     }
 
-    /// @inheritdoc IRecoverable
-    function updateSocialRecoverySupport(bool enabled) external override onlyEntryPoint {
-        _updateSocialRecoverySupport(enabled);
+    /// @inheritdoc ISocialRecoveryPlugin
+    function updateCustomRecoveryConfig(CustomRecoveryConfig memory customConfig) external override onlyEntryPoint {
+        _updateCustomRecoveryConfig(customConfig);
     }
 
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISocialRecoveryPlugin
+    function getCustomRecoveryConfig() external view override returns (CustomRecoveryConfig memory customConfig) {
+        return recoveryConfig.customConfig;
+    }
+
+    /// @inheritdoc ISocialRecoveryPlugin
     function initiateRecovery(address account, address newOwner) 
         external 
         override 
@@ -494,28 +510,31 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         ISFAccount(account).receiveRecoveryInitiation(newOwner);
     }
 
-    /// @inheritdoc IRecoverable
-    function receiveRecoveryInitiation(address newOwner) external override onlyGuardian notFrozen recoverable {
-        RecoveryRecord memory pendingRecovery = _getPendingRecovery();
-        if (pendingRecovery.previousOwner != address(0)) {
-            revert SFAccount__RecoveryAlreadyInitiated(pendingRecovery.newOwner);
-        }
+    /// @inheritdoc ISocialRecoveryPlugin
+    function receiveRecoveryInitiation(address newOwner) 
+        external 
+        override 
+        onlyGuardian 
+        notFrozen 
+        recoverable 
+        notRecovering 
+    {
         RecoveryRecord memory recoveryRecord = RecoveryRecord({
             isCompleted: false,
             isCancelled: false,
             cancelledBy: address(0),
             previousOwner: owner(),
             newOwner: newOwner,
-            totalGuardians: guardians.length(),
+            totalGuardians: recoveryConfig.customConfig.guardians.length,
             approvedGuardians: new address[](0),
-            executableTime: block.timestamp + recoveryTimeLock
+            executableTime: block.timestamp + recoveryConfig.customConfig.recoveryTimeLock
         });
         recoveryRecords.push(recoveryRecord);
         _freezeAccount(msg.sender);
         emit SFAccount__RecoveryInitiated(newOwner);
     }
 
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISocialRecoveryPlugin
     function approveRecovery(address account) 
         external 
         override 
@@ -523,22 +542,22 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         notFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveRecoveryApproval();
+        ISFAccount(account).receiveApproveRecovery();
     }
 
-    /// @inheritdoc IRecoverable
-    function receiveRecoveryApproval() external override onlyGuardian notFrozen recoverable {
+    /// @inheritdoc ISocialRecoveryPlugin
+    function receiveApproveRecovery() external override onlyGuardian notFrozen recoverable {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         recoveryRecord.approvedGuardians.push(msg.sender);
         emit SFAccount__RecoveryApproved(msg.sender);
-        bool approvalIsSufficient = recoveryRecord.approvedGuardians.length >= minGuardianApprovals;
+        bool approvalIsSufficient = recoveryRecord.approvedGuardians.length >= recoveryConfig.customConfig.minGuardianApprovals;
         bool executableTimeReached = block.timestamp >= recoveryRecord.executableTime;
         if (approvalIsSufficient && executableTimeReached) {
             _completeRecovery();
         }
     }
 
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISocialRecoveryPlugin
     function cancelRecovery(address account) 
         external 
         override 
@@ -546,19 +565,35 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         notFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveRecoveryCancellation();
+        ISFAccount(account).receiveCancelRecovery();
     }
 
-    /// @inheritdoc IRecoverable
-    function receiveRecoveryCancellation() external override onlyGuardian notFrozen recoverable {
+    /// @inheritdoc ISocialRecoveryPlugin
+    function receiveCancelRecovery() external override onlyGuardian notFrozen recoverable {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         recoveryRecord.isCancelled = true;
         recoveryRecord.cancelledBy = msg.sender;
-        _unFreezeAccount(msg.sender);
+        _unfreezeAccount(msg.sender);
         emit SFAccount__RecoveryCancelled(msg.sender);
     }
 
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISocialRecoveryPlugin
+    function completeRecovery(address account)
+        external 
+        override 
+        onlyEntryPoint 
+        notFrozen 
+        recoverableAccount(account) 
+    {
+        ISFAccount(account).receiveCompleteRecovery();
+    }
+
+    /// @inheritdoc ISocialRecoveryPlugin
+    function receiveCompleteRecovery() external override onlyGuardian notFrozen recoverable {
+        _completeRecovery();
+    }
+
+    /// @inheritdoc ISocialRecoveryPlugin
     function getRecoveryProgress() external view override recoverable returns (
         bool isInRecoveryProgress, 
         uint256 currentApprovals, 
@@ -572,52 +607,18 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         }
         isInRecoveryProgress = true;
         currentApprovals = recoveryRecord.approvedGuardians.length;
-        requiredApprovals = minGuardianApprovals;
+        requiredApprovals = recoveryConfig.customConfig.minGuardianApprovals;
         executableTime = recoveryRecord.executableTime;
     }
 
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISocialRecoveryPlugin
     function getGuardians() external view override recoverable returns (address[] memory) {
-        return guardians.values();
+        return recoveryConfig.customConfig.guardians;
     }
 
-    /// @inheritdoc IRecoverable
-    function addGuardian(address guardian) public override onlyEntryPoint recoverable notFrozen {
-        _requireSFAccount(guardian);
-        if (guardians.length() == maxGuardians) {
-            revert SFAccount__TooManyGuardians(maxGuardians);
-        }
-        _grantRole(GUARDIAN_ROLE, guardian);
-        guardians.add(guardian);
-        emit SFAccount__GuardianAdded(guardian);
-    }
-
-    /// @inheritdoc IRecoverable
-    function removeGuardian(address guardian) external override onlyEntryPoint recoverable notFrozen {
-        _requireSFAccount(guardian);
-        _revokeRole(GUARDIAN_ROLE, guardian);
-        guardians.remove(guardian);
-        emit SFAccount__GuardianRemoved(guardian);
-    }
-
-    /// @inheritdoc IRecoverable
+    /// @inheritdoc ISocialRecoveryPlugin
     function isGuardian(address account) external view recoverable override returns (bool) {
-        return guardians.contains(account);
-    }
-
-    /// @inheritdoc ISFAccount
-    function freeze() external override onlyEntryPoint {
-        _freezeAccount(owner());
-    }
-
-    /// @inheritdoc ISFAccount
-    function unfreeze() external override onlyEntryPoint {
-        _unFreezeAccount(owner());
-    }
-
-    /// @inheritdoc ISFAccount
-    function isFrozen() external view override returns (bool) {
-        return frozen;
+        return recoveryConfig.customConfig.guardians.contains(account);
     }
 
     /// @inheritdoc BaseAccount
@@ -640,19 +641,15 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         bool upkeepNeeded, 
         bytes memory performData
     ) {
-        if (autoTopUpEnabled) {
-            (bool danger, uint256 collateralRatio, uint256 liquidationThreshold) = _checkCollateralSafety();
-            if (danger) {
-                upkeepNeeded = true;
-                emit SFAccount__Danger(collateralRatio, liquidationThreshold);
-                return (upkeepNeeded, performData);
-            }
-        }
+        upkeepNeeded = _shouldTopUp();
+        return (upkeepNeeded, performData);
     }
 
     /// @inheritdoc AutomationCompatibleInterface
     function performUpkeep(bytes calldata /* performData */) external override {
-        _topUpToMaintainCollateralRatio(sfEngine.getMinimumCollateralRatio());
+        if (_shouldTopUp()) {
+            _topUpToMaintainCollateralRatio(sfEngine.getMinimumCollateralRatio());
+        }
     }
 
     /// @inheritdoc ERC165
@@ -668,8 +665,9 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     function _validateSignature(
         PackedUserOperation calldata userOp,
         bytes32 userOpHash
-    ) internal override returns (uint256 validationData) {
-
+    ) internal view override returns (uint256 validationData) {
+        address signer = ECDSA.recover(userOpHash, userOp.signature);
+        return signer == owner() ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
     }
 
     function _checkCollateralSafety() private view returns (
@@ -684,25 +682,36 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         }
     }
 
-    function _topUpCollateral(address collateralTokenAddress, uint256 amount) private {
-        uint256 collateralBalance = _getCollateralBalance(collateralTokenAddress);
+    function _shouldTopUp() private returns (bool) {
+        if (autoTopUpConfig.customConfig.autoTopUpEnabled) {
+            (bool danger, uint256 collateralRatio, uint256 liquidationThreshold) = _checkCollateralSafety();
+            if (danger) {
+                emit SFAccount__Danger(collateralRatio, liquidationThreshold);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function _topUpCollateral(address collateralAddress, uint256 amount) private {
+        uint256 collateralBalance = _getCollateralBalance(collateralAddress);
         if (collateralBalance < amount) {
             revert SFAccount__InsufficientCollateral(
                 address(sfEngine), 
-                collateralTokenAddress, 
+                collateralAddress, 
                 collateralBalance, 
                 amount
             );
         }
-        emit SFAccount__TopUpCollateral(collateralTokenAddress, amount);
-        IERC20(collateralTokenAddress).approve(address(sfEngine), amount);
-        sfEngine.depositCollateralAndMintSFToken(collateralTokenAddress, amount, 0);
+        emit SFAccount__TopUpCollateral(collateralAddress, amount);
+        IERC20(collateralAddress).approve(address(sfEngine), amount);
+        sfEngine.depositCollateralAndMintSFToken(collateralAddress, amount, 0);
     }
 
     function _topUpToMaintainCollateralRatio(uint256 targetCollateralRatio) private {
-        uint256 sfTokenBalance = _getSFTokenBalance();
+        uint256 sfDebt = _getSFDebt();
         uint256 currentCollateralInUsd = sfEngine.getTotalCollateralValueInUsd(address(this));
-        uint256 requiredCollateralInUsd = sfTokenBalance * targetCollateralRatio / PRECISION_FACTOR;
+        uint256 requiredCollateralInUsd = sfDebt * targetCollateralRatio / PRECISION_FACTOR;
         if (currentCollateralInUsd >= requiredCollateralInUsd) {
             revert SFAccount__TopUpNotNeeded(currentCollateralInUsd, requiredCollateralInUsd, targetCollateralRatio);
         }
@@ -710,10 +719,10 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         address[] memory collaterals = depositedCollaterals.values();
         for (uint256 i = 0; i < collaterals.length && collateralToTopUpInUsd > 0; i++) {
             address priceFeed = supportedCollaterals[collaterals[i]];
-            if (priceFeed == address(0)) {
+            uint256 collateralBalance = _getCollateralBalance(collaterals[i]);
+            if (priceFeed == address(0) || collateralBalance == 0) {
                 continue;
             }
-            uint256 collateralBalance = _getCollateralBalance(collaterals[i]);
             uint256 collateralBalanceInUsd = AggregatorV3Interface(priceFeed).getTokenValue(collateralBalance);
             uint256 amountCollateralToTopUp;
             if (collateralBalanceInUsd >= collateralToTopUpInUsd) {
@@ -726,7 +735,7 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
             _topUpCollateral(collaterals[i], amountCollateralToTopUp);
         }
         if (collateralToTopUpInUsd > 0) {
-            uint256 currentCollateralRatio = requiredCollateralInUsd * PRECISION_FACTOR / sfTokenBalance;
+            uint256 currentCollateralRatio = requiredCollateralInUsd * PRECISION_FACTOR / sfDebt;
             emit SFAccount__InsufficientCollateralForTopUp(
                 collateralToTopUpInUsd,
                 currentCollateralRatio,
@@ -734,6 +743,10 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
             );
         }
         emit SFAccount__CollateralRatioMaintained(collateralToTopUpInUsd, targetCollateralRatio);
+    }
+
+    function _supportsSocialRecovery() private view returns (bool) {
+        return recoveryConfig.customConfig.socialRecoveryEnabled;
     }
 
     function _updateSupportedCollaterals(
@@ -752,13 +765,33 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         emit SFAccount__CollateralAndPriceFeedUpdated(collaterals.length);
     }
 
-    function _initializeGuardians(address[] memory _guardians, uint256 _maxGuardians) private {
-        if (_guardians.length > _maxGuardians) {
-            revert SFAccount__TooManyGuardians(_maxGuardians);
+    function _updateCustomRecoveryConfig(CustomRecoveryConfig memory customConfig) private {
+        if (recoveryConfig.customConfig.socialRecoveryEnabled 
+            && !customConfig.socialRecoveryEnabled) {
+            // If disable social recovery, check whether account is in recovering process
+            _requireNotRecovering();
         }
-        for (uint256 i = 0; i < _guardians.length; i++) {
-            addGuardian(_guardians[i]);
+        if (customConfig.minGuardianApprovals == 0) {
+            revert SFAccount__MinGuardianApprovalsIsNotSet();
         }
+        if (customConfig.guardians.length == 0) {
+            revert SFAccount__NoGuardianSet();
+        }
+        if (customConfig.minGuardianApprovals > customConfig.guardians.length) {
+            revert SFAccount__ApprovalExceedsGuardianAmount(
+                customConfig.minGuardianApprovals, 
+                customConfig.guardians.length
+            );
+        }
+        recoveryConfig.customConfig = customConfig;
+        bytes memory configBytes = abi.encode(customConfig);
+        emit SFAccount__UpdateCustomRecoveryConfig(customConfig.socialRecoveryEnabled, configBytes);
+    }
+
+    function _updateCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) private {
+        autoTopUpConfig.customConfig = customConfig;
+        bytes memory configBytes = abi.encode(customConfig);
+        emit SFAccount__UpdateCustomAutoTopUpConfig(customConfig.autoTopUpEnabled, configBytes);
     }
 
     function _requireSupportedCollateral(address collateral) private view {
@@ -768,8 +801,14 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     }
 
     function _requireSFAccount(address account) private view {
-        if (account == address(0) || !account.supportsInterface(type(ISFAccount).interfaceId)) {
+        if (!account.supportsInterface(type(ISFAccount).interfaceId)) {
             revert SfAccount__NotSFAccount(account);
+        }
+    }
+
+    function _requireNotRecovering() private view {
+        if (_existsPendingRecovery()) {
+            revert SFAccount__AccountIsInRecoveryProcess();
         }
     }
 
@@ -793,31 +832,6 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         }
         customCollateralRatio = collateralRatio;
         emit SFAccount__CustomCollateralRatioUpdated(collateralRatio);
-    }
-
-    function _updateAutoTopUpSupport(bool enabled) private {
-        autoTopUpEnabled = enabled;
-        emit SFAccount__UpdateAutoTopUpSupport(enabled);
-    }
-
-    function _updateSocialRecoverySupport(bool enabled) private {
-        socialRecoveryEnabled = enabled;
-        emit SFAccount__UpdateSocialRecoverySupport(enabled);
-    }
-
-    function _updateMaxGuardians(uint8 _maxGuardians) private {
-        maxGuardians = _maxGuardians;
-        emit SFAccount__MaxGuardiansUpdated(_maxGuardians);
-    }
-
-    function _updateMinGuardianApprovals(uint8 _minGuardianApprovals) private {
-        minGuardianApprovals = _minGuardianApprovals;
-        emit SFAccount__MinGuardianApprovalsUpdated(_minGuardianApprovals);
-    }
-
-    function _updateRecoveryTimeLock(uint256 _recoveryTimeLock) private {
-        recoveryTimeLock = _recoveryTimeLock;
-        emit SFAccount__RecoveryTimeLockUpdated(_recoveryTimeLock);
     }
 
     function _getPendingRecovery() private view returns (RecoveryRecord storage) {
@@ -852,8 +866,9 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
     function _completeRecovery() private {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         uint256 currentApprovals = recoveryRecord.approvedGuardians.length;
-        if (currentApprovals < minGuardianApprovals) {
-            revert SFAccount__InsufficientApprovals(currentApprovals, minGuardianApprovals);
+        uint256 minApprovals = recoveryConfig.customConfig.minGuardianApprovals;
+        if (currentApprovals < minApprovals) {
+            revert SFAccount__InsufficientApprovals(currentApprovals, minApprovals);
         }
         if (block.timestamp < recoveryRecord.executableTime) {
             revert SFAccount__RecoveryNotExecutable(recoveryRecord.executableTime);
@@ -875,7 +890,7 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         emit SFAccount__AccountFreezed(freezedBy);
     }
 
-    function _unFreezeAccount(address unfreezedBy) private {
+    function _unfreezeAccount(address unfreezedBy) private {
         _requireFrozen();
         FreezeRecord storage freezeRecord = freezeRecords[freezeRecords.length - 1];
         freezeRecord.isUnfreezed = true;
@@ -883,12 +898,16 @@ contract SFAccount is ISFAccount, BaseAccount, AutomationCompatible, OwnableUpgr
         emit SFAccount__AccountUnfreezed(unfreezedBy);
     }
 
-    function _getCollateralBalance(address collateralTokenAddress) private view returns (uint256) {
-        return IERC20(collateralTokenAddress).balanceOf(address(this));
+    function _getCollateralBalance(address collateralAddress) private view returns (uint256) {
+        return IERC20(collateralAddress).balanceOf(address(this));
     }
 
     function _getSFTokenBalance() private view returns (uint256) {
         return IERC20(sfTokenAddress).balanceOf(address(this));
+    }
+
+    function _getSFDebt() private view returns (uint256) {
+        return sfEngine.getSFDebt(address(this));
     }
 
     function _requireNotFrozen() private view {

@@ -56,7 +56,7 @@ contract ContinueOnRevertHandler is Test {
         address user = pickRandomAddress(userDeposited, userSeed);
         vm.assume(user != address(0));
         address tokenAddress = pickRandomAddress(tokenAddresses, collateralTokenAddressSeed);
-        uint256 sfMinted = sfEngine.getSFTokenMinted(user);
+        uint256 sfMinted = sfEngine.getSFDebt(user);
         vm.assume(sfMinted > 0);
         bound(debtToCover, 1, sfMinted);
         sfEngine.liquidate(user, tokenAddress, debtToCover);
