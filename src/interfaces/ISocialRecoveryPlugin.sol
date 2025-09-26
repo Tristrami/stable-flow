@@ -58,21 +58,21 @@ interface ISocialRecoveryPlugin {
 
     /**
      * @dev Checks if social recovery feature is enabled for current account
-     * @return True if social recovery is supported, false otherwise
+     * @return bool True if social recovery is supported, false otherwise
      */
     function supportsSocialRecovery() external view returns (bool);
 
     /**
      * @dev Gets the base recovery configuration
-     * @return customConfig The current RecoveryConfig settings
+     * @return RecoveryConfig The current RecoveryConfig settings
      */
-    function getRecoveryConfig() external view returns (RecoveryConfig memory customConfig);
+    function getRecoveryConfig() external view returns (RecoveryConfig memory);
 
     /**
      * @dev Gets the custom recovery configuration
-     * @return customConfig The current CustomRecoveryConfig settings
+     * @return CustomRecoveryConfig The current CustomRecoveryConfig settings
      */
-    function getCustomRecoveryConfig() external returns (CustomRecoveryConfig memory customConfig);
+    function getCustomRecoveryConfig() external returns (CustomRecoveryConfig memory);
 
     /**
      * @dev Updates the custom recovery configuration
@@ -171,7 +171,7 @@ interface ISocialRecoveryPlugin {
     /**
      * @dev Gets the current recovery progress status
      * @return isInRecoveryProgress True if recovery is in progress
-     * @return currentApprovals Number of approvals received
+     * @return receivedApprovals Number of approvals received
      * @return requiredApprovals Number of approvals required
      * @return executableTime When recovery can be executed
      * @notice Requirements:
@@ -179,7 +179,7 @@ interface ISocialRecoveryPlugin {
      */
     function getRecoveryProgress() external view returns (
         bool isInRecoveryProgress, 
-        uint256 currentApprovals, 
+        uint256 receivedApprovals, 
         uint256 requiredApprovals, 
         uint256 executableTime
     );

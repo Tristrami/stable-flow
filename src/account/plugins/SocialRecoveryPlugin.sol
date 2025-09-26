@@ -151,13 +151,13 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function getRecoveryConfig() external view override returns (RecoveryConfig memory customConfig) {
+    function getRecoveryConfig() external view override returns (RecoveryConfig memory) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         return $.recoveryConfig;
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function getCustomRecoveryConfig() external view override returns (CustomRecoveryConfig memory customConfig) {
+    function getCustomRecoveryConfig() external view override returns (CustomRecoveryConfig memory) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         return $.customRecoveryConfig;
     }
@@ -267,7 +267,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     /// @inheritdoc ISocialRecoveryPlugin
     function getRecoveryProgress() external view override recoverable returns (
         bool isInRecoveryProgress, 
-        uint256 currentApprovals, 
+        uint256 receivedApprovals, 
         uint256 requiredApprovals, 
         uint256 executableTime
     ) {
@@ -275,10 +275,10 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         RecoveryRecord memory recoveryRecord = _getPendingRecoveryUnchecked();
         if (recoveryRecord.previousOwner == address(0)) {
             isInRecoveryProgress = false;
-            return (isInRecoveryProgress, currentApprovals, requiredApprovals, executableTime);
+            return (isInRecoveryProgress, receivedApprovals, requiredApprovals, executableTime);
         }
         isInRecoveryProgress = true;
-        currentApprovals = recoveryRecord.approvedGuardians.length;
+        receivedApprovals = recoveryRecord.approvedGuardians.length;
         requiredApprovals = $.customRecoveryConfig.minGuardianApprovals;
         executableTime = recoveryRecord.executableTime;
     }
