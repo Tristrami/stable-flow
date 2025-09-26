@@ -486,8 +486,9 @@ abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCo
                 currentCollateralRatio,
                 targetCollateralRatio
             );
+        } else {
+            emit VaultPlugin__CollateralRatioMaintained(collateralToTopUpInUsd, targetCollateralRatio);
         }
-        emit VaultPlugin__CollateralRatioMaintained(collateralToTopUpInUsd, targetCollateralRatio);
     }
 
     function _getCollateralBalance(address collateralAddress) private view returns (uint256) {
