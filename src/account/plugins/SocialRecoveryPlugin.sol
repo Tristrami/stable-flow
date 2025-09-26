@@ -8,6 +8,19 @@ import {ISFAccount} from "../../interfaces/ISFAccount.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
+/**
+ * @title SocialRecoveryPlugin
+ * @dev Abstract contract implementing social recovery functionality for SFAccounts
+ * @notice Provides multi-signature guardian-based account recovery mechanism
+ * @notice Key features:
+ * - Guardian-managed account ownership recovery
+ * - Configurable approval thresholds and time locks
+ * - Recovery process tracking and verification
+ * - Integration with SFAccount security model
+ * @notice Inherits from:
+ * - ISocialRecoveryPlugin (interface)
+ * - BaseSFAccountPlugin (base plugin functionality)
+ */
 abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPlugin {
 
     using ERC165Checker for address;
@@ -53,12 +66,29 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Storage structure for social recovery plugin
+     * @notice Maintains all state variables for account recovery operations including:
+     * - Recovery configuration parameters
+     * - Guardian management
+     * - Recovery process tracking
+     */
     struct SocialRecoveryPluginStorage {
-        RecoveryConfig recoveryConfig; // Social recovery config
-        CustomRecoveryConfig customRecoveryConfig; // Custom social recovery config
-        ISFEngine sfEngine; // The sfEngine contract used to interact with protocol
-        RecoveryRecord[] recoveryRecords; // The recovery records of current account
-        EnumerableSet.AddressSet guardians; // Guardian address set
+        /// @dev Base recovery configuration parameters
+        /// @notice Contains protocol-level settings for all accounts
+        RecoveryConfig recoveryConfig;
+        /// @dev Account-specific recovery customization
+        /// @notice Allows per-account adjustment of recovery parameters
+        CustomRecoveryConfig customRecoveryConfig;
+        /// @dev Reference to the core SFEngine protocol contract
+        /// @notice Used for cross-contract interactions and state verification
+        ISFEngine sfEngine;
+        /// @dev Historical record of recovery attempts
+        /// @notice Tracks all recovery processes with timestamps and outcomes
+        RecoveryRecord[] recoveryRecords;
+        /// @dev Set of approved guardian addresses
+        /// @notice Uses EnumerableSet for efficient management and iteration
+        EnumerableSet.AddressSet guardians;
     }
 
     /* -------------------------------------------------------------------------- */

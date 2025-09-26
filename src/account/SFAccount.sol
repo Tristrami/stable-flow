@@ -15,6 +15,24 @@ import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 
+/**
+ * @title SFAccount
+ * @dev Core account contract implementing ERC-4337 account abstraction with plugin architecture
+ * @notice Combines:
+ * - Vault functionality (collateral management)
+ * - Social recovery mechanisms
+ * - ERC-4337 compliant account operations
+ * @notice Key features:
+ * - Modular plugin system (Vault/SocialRecovery plugins)
+ * - Upgradeable via factory pattern
+ * - Frozen state for security incidents
+ * - ERC-4337 signature validation
+ * @notice Inherits from:
+ * - VaultPlugin (collateral management)
+ * - SocialRecoveryPlugin (guardian recovery)
+ * - BaseAccount (ERC-4337 core)
+ * - ERC165 (interface detection)
+ */
 contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
 
     /* -------------------------------------------------------------------------- */
@@ -33,34 +51,63 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
 
-    event SFAccount__FreezeAccount(address indexed freezedBy);
-    event SFAccount__UnfreezeAccount(address indexed unfreezedBy);
+    event SFAccount__AccountCreated(address indexed owner);
+    event SFAccount__FreezeAccount(address indexed frozenBy);
+    event SFAccount__UnfreezeAccount(address indexed unfrozenBy);
 
     /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Record tracking account freeze/unfreeze events
+     * @notice Used for security auditing and account state history tracking
+     * @notice Maintains complete lifecycle of each freeze operation
+     */
     struct FreezeRecord {
-        address freezedBy;
-        address unfreezedBy;
-        bool isUnfreezed;
+        /// @dev Address that initiated the freeze operation
+        /// @notice Typically the EntryPoint or guardians
+        address frozenBy;
+        /// @dev Address that executed unfreeze operation
+        /// @notice Zero address (0x0) indicates still frozen state
+        address unfrozenBy;
+        /// @dev Current state flag for this freeze record
+        /// @notice true = unfrozen, false = currently frozen
+        bool isUnfozen;
     }
 
     /* -------------------------------------------------------------------------- */
     /*                               State Variables                              */
     /* -------------------------------------------------------------------------- */
 
-    /// @dev The sfEngine contract used to interact with protocol
+    /// @dev Main protocol engine contract interface
+    /// @notice Handles core protocol operations including collateral management and token minting/burning
+    /// @notice Uses ISFEngine interface for type safety
     ISFEngine private sfEngine;
-    /// @dev Address of SFToken contract
+
+    /// @dev Address of the SF Token contract
+    /// @notice Used for balance checks and token transfers
+    /// @notice This is the native token of the protocol ecosystem
     address private sfTokenAddress;
-    /// @dev The Entry point contract address on current chain
+
+    /// @dev Entry Point contract address for this chain
+    /// @notice All privileged operations must originate from this address
+    /// @notice Implements ERC-4337 Account Abstraction standards
     address private entryPointAddress;
-    /// @dev The address of the factory contract which creates this account contract
+
+    /// @dev Factory contract that created this account
+    /// @notice Used for upgradeability and account management
+    /// @notice May be used for factory-specific account verification
     address private accountFactoryAddress;
-    /// @dev Whether this account is frozen
+
+    /// @dev Account frozen status flag
+    /// @notice When true, restricts most account operations
+    /// @notice Only modifiable by privileged contracts (EntryPoint)
     bool private frozen;
-    /// @dev The freeze records of current account
+
+    /// @dev Historical record of account freeze events
+    /// @notice Contains timestamps and reasons for each freeze/unfreeze
+    /// @notice Helps track account security history and compliance
     FreezeRecord[] private freezeRecords;
 
     /* -------------------------------------------------------------------------- */
@@ -111,6 +158,11 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     /* -------------------------------------------------------------------------- */
     /*                         External / Public Functions                        */
     /* -------------------------------------------------------------------------- */
+
+    /// @inheritdoc ISFAccount
+    function createAccount() external override {
+        emit SFAccount__AccountCreated(owner());
+    }
 
     /// @inheritdoc ISFAccount
     function getOwner() external view override returns (address) {
@@ -195,24 +247,24 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
         return signer == owner() ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
     }
 
-    function _freezeAccount(address freezedBy) private {
+    function _freezeAccount(address frozenBy) private {
         _requireNotFrozen();
         frozen = true;
         FreezeRecord memory freezeRecord = FreezeRecord({
-            freezedBy: freezedBy,
-            unfreezedBy: address(0),
-            isUnfreezed: false
+            frozenBy: frozenBy,
+            unfrozenBy: address(0),
+            isUnfozen: false
         });
         freezeRecords.push(freezeRecord);
-        emit SFAccount__FreezeAccount(freezedBy);
+        emit SFAccount__FreezeAccount(frozenBy);
     }
 
-    function _unfreezeAccount(address unfreezedBy) private {
+    function _unfreezeAccount(address unfrozenBy) private {
         _requireFrozen();
         FreezeRecord storage freezeRecord = freezeRecords[freezeRecords.length - 1];
-        freezeRecord.isUnfreezed = true;
-        freezeRecord.unfreezedBy = unfreezedBy;
-        emit SFAccount__UnfreezeAccount(unfreezedBy);
+        freezeRecord.isUnfozen = true;
+        freezeRecord.unfrozenBy = unfrozenBy;
+        emit SFAccount__UnfreezeAccount(unfrozenBy);
     }
 
     function _getSFTokenBalance() private view returns (uint256) {

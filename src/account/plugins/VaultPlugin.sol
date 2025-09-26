@@ -12,6 +12,24 @@ import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165C
 import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 
+/**
+ * @title VaultPlugin
+ * @dev Abstract contract implementing collateral vault functionality for SFAccounts
+ * @notice Provides:
+ * - Collateral deposit/withdrawal management
+ * - Automated collateral ratio maintenance
+ * - Liquidation protection mechanisms
+ * - Chainlink Automation integration
+ * @notice Key features:
+ * - Multi-collateral support with price feeds
+ * - Configurable collateral ratios
+ * - Auto-topup for collateral maintenance
+ * - Integrated with SFEngine protocol
+ * @notice Inherits from:
+ * - IVaultPlugin (interface)
+ * - BaseSFAccountPlugin (base plugin functionality) 
+ * - AutomationCompatible (Chainlink Automation)
+ */
 abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCompatible {
 
     using OracleLib for AggregatorV3Interface;
@@ -96,13 +114,32 @@ abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCo
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Storage structure for VaultPlugin contract
+     * @notice Maintains all state variables for vault operations including:
+     * - Protocol engine interface
+     * - Token configurations
+     * - Collateral tracking
+     */
     struct VaultPluginStorage {
-        ISFEngine sfEngine; // SFEngine
-        address sfTokenAddress; // The SF Token contract address
-        VaultConfig vaultConfig; // System vault config
-        CustomVaultConfig customVaultConfig; // Custom vault config
-        EnumerableMap.AddressToAddressMap supportedCollaterals; // Supported collateral and its price feed
-        EnumerableSet.AddressSet depositedCollaterals; // The address set of deposited token contract address
+        /// @dev Reference to SFEngine protocol contract
+        /// @notice Handles core protocol operations including collateral management
+        ISFEngine sfEngine;
+        /// @dev Address of the SF Token contract
+        /// @notice Used for balance checks and token transfers
+        address sfTokenAddress;
+        /// @dev System-wide vault configuration
+        /// @notice Contains protocol-level parameters for all vaults
+        VaultConfig vaultConfig;
+        /// @dev Vault-specific custom configuration
+        /// @notice Allows per-vault customization of collateral parameters
+        CustomVaultConfig customVaultConfig;
+        /// @dev Mapping of supported collateral tokens to their price feeds
+        /// @notice Uses EnumerableMap for efficient iteration and lookup
+        EnumerableMap.AddressToAddressMap supportedCollaterals;
+        /// @dev Set of currently deposited collateral tokens
+        /// @notice Tracks active collateral positions for the vault
+        EnumerableSet.AddressSet depositedCollaterals;
     }
     
     /* -------------------------------------------------------------------------- */
@@ -111,7 +148,7 @@ abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCo
 
     /// @dev keccak256(abi.encode(uint256(keccak256("stableflow.storage.VaultPlugin")) - 1)) & ~bytes32(uint256(0xff))
     bytes32 private constant VAULT_PLUGIN_STORAGE_LOCATION = 0x2e0734a179e09ba5c0a4792616988f710c223d2ae2465d68704e987ae2447600;
-    /// @dev Precision factor used to calculate
+    /// @dev Base precision factor used for mathematical calculations throughout the contract
     uint256 private constant PRECISION_FACTOR = 1e18;
 
     /* -------------------------------------------------------------------------- */

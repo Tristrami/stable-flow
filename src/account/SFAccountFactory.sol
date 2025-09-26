@@ -11,6 +11,11 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 
+/**
+ * @title SFAccountFactory
+ * @dev Factory contract for deploying SFAccount proxy instances
+ * @notice Implements UUPS upgrade pattern with BeaconProxy deployment
+ */
 contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
 
     using ERC165Checker for address;

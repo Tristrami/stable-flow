@@ -5,6 +5,22 @@ import {Validator} from "./Validator.sol";
 import {ERC20Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/ERC20Upgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 
+/**
+ * @title SFToken
+ * @dev Upgradeable ERC20 token contract for StableFlow protocol
+ * @notice Core features:
+ * - Mintable/Burnable by contract owner
+ * - UUPS upgrade pattern support
+ * - Address and zero-value validation
+ * @notice Key characteristics:
+ * - Token symbol: "SF"
+ * - Used as stablecoin/debt token in protocol
+ * - Owner-restricted supply control
+ * @notice Inherits from:
+ * - Validator (input validation)
+ * - ERC20Upgradeable (standard token)
+ * - OwnableUpgradeable (ownership control)
+ */
 contract SFToken is Validator, ERC20Upgradeable, OwnableUpgradeable {
 
     event SFToken__TokenBurned(uint256 indexed amount);

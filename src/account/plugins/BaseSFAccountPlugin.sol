@@ -7,6 +7,25 @@ import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165C
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 
+/**
+ * @title BaseSFAccountPlugin
+ * @dev Abstract base contract for all SFAccount plugins
+ * @notice Provides core functionality required by all SFAccount plugins:
+ * - EntryPoint access control (ERC-4337)
+ * - Account frozen state management
+ * - SFAccount interface verification
+ * - Upgradeable ownership and role-based access
+ * @notice Key features:
+ * - Implements ERC-4337 BaseAccount standard
+ * - Supports upgradeable plugin architecture
+ * - Provides frozen state protection
+ * - Enforces SFAccount interface compliance
+ * @notice Inherits from:
+ * - ISFAccount (interface)
+ * - BaseAccount (ERC-4337)
+ * - OwnableUpgradeable (upgradeable ownership)
+ * - AccessControlUpgradeable (role-based access)
+ */
 abstract contract BaseSFAccountPlugin is ISFAccount, BaseAccount, OwnableUpgradeable, AccessControlUpgradeable {
 
     using ERC165Checker for address;
