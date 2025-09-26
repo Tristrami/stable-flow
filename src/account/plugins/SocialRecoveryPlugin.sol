@@ -59,8 +59,12 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     event SocialRecoveryPlugin__UpdateGuardians(uint256 numGuardians);
     event SocialRecoveryPlugin__RecoveryInitiated(address indexed newOwner);
     event SocialRecoveryPlugin__RecoveryApproved(address indexed guardian);
-    event SocialRecoveryPlugin__RecoveryCancelled(address indexed guardian);
-    event SocialRecoveryPlugin__RecoveryCompleted(address indexed previousOwner, address indexed newOwner);
+    event SocialRecoveryPlugin__RecoveryCancelled(address indexed guardian, bytes recordData);
+    event SocialRecoveryPlugin__RecoveryCompleted(
+        address indexed previousOwner, 
+        address indexed newOwner, 
+        bytes recordData
+    );
 
     /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
@@ -241,7 +245,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         recoveryRecord.isCancelled = true;
         recoveryRecord.cancelledBy = msg.sender;
         this.unfreeze();
-        emit SocialRecoveryPlugin__RecoveryCancelled(msg.sender);
+        emit SocialRecoveryPlugin__RecoveryCancelled(msg.sender, abi.encode(recoveryRecord));
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -388,7 +392,11 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         recoveryRecord.isCompleted = true;
         recoveryRecord.completedBy = completedBy;
         this.transferOwnership(recoveryRecord.newOwner);
-        emit SocialRecoveryPlugin__RecoveryCompleted(recoveryRecord.previousOwner, recoveryRecord.newOwner);
+        emit SocialRecoveryPlugin__RecoveryCompleted(
+            recoveryRecord.previousOwner, 
+            recoveryRecord.newOwner,
+            abi.encode(recoveryRecord)
+        );
     }
 
     function _supportsSocialRecovery() private view returns (bool) {
