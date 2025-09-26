@@ -1,21 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
+import {BaseSFAccountPlugin} from "./BaseSFAccountPlugin.sol";
 import {IVaultPlugin} from "../../interfaces/IVaultPlugin.sol";
 import {ISFEngine} from "../../interfaces/ISFEngine.sol";
-import {ISFAccount} from "../../interfaces/ISFAccount.sol";
 import {OracleLib, AggregatorV3Interface} from "../../libraries/OracleLib.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 
-contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
+abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCompatible {
 
     using OracleLib for AggregatorV3Interface;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableMap for EnumerableMap.AddressToAddressMap;
     using ERC165Checker for address;
 
     /* -------------------------------------------------------------------------- */
@@ -39,19 +40,19 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         uint256 targetCollateralRatio
     );
     error VaultPlugin__TopUpThresholdTooSmall(uint256 topUpThreshold, uint256 liquidationThreshold);
+    error VaultPlugin__CustomCollateralRatioTooSmall(uint256 collateralRatio, uint256 minCollateralRatio);
     error VaultPlugin__NotSFAccount(address account);
     error VaultPlugin__InsufficientBalance(address receiver, uint256 balance, uint256 required);
     error VaultPlugin__InvalidTokenAmount(uint256 tokenAmount);
     error VaultPlugin__TransferFailed();
     error VaultPlugin__InvalidTokenAddress(address tokenAddress);
     error VaultPlugin__NotFromEntryPoint();
-    error VaultPlugin__AccountIsFrozen();
 
     /* -------------------------------------------------------------------------- */
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
 
-    event VaultPlugin__CollateralAndPriceFeedUpdated(uint256 indexed numCollateral);
+    event VaultPlugin__UpdateCollateralAndPriceFeed(uint256 indexed numCollateral);
     event VaultPlugin__Invest(
         address indexed collateralAddress, 
         uint256 indexed amountCollateral, 
@@ -88,22 +89,22 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     event VaultPlugin__Withdraw(address indexed collateralAddress, uint256 indexed amount);
     event VaultPlugin__AddNewCollateral(address indexed collateralAddress);
     event VaultPlugin__RemoveCollateral(address indexed collateralAddress);
-    event VaultPlugin__UpdateCustomAutoTopUpConfig(bool indexed enabled, bytes configData);
+    event VaultPlugin__UpdateVaultConfig(bytes configData);
+    event VaultPlugin__UpdateCustomVaultConfig(bytes configData);
 
     /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
     struct VaultPluginStorage {
-        mapping(address collateral => address priceFeed) supportedCollaterals; // Supported collateral and its price feed
         ISFEngine sfEngine; // SFEngine
         address sfTokenAddress; // The SF Token contract address
-        address entryPointAddress; // The address of entry point address
-        uint256 customCollateralRatio; // The collateral ration used to invest, must be greater than or equal to the minimum collateral ratio supported by SFEngine
+        VaultConfig vaultConfig; // System vault config
+        CustomVaultConfig customVaultConfig; // Custom vault config
+        EnumerableMap.AddressToAddressMap supportedCollaterals; // Supported collateral and its price feed
         EnumerableSet.AddressSet depositedCollaterals; // The address set of deposited token contract address
-        AutoTopUpConfig autoTopUpConfig; // Auto top up config
     }
-
+    
     /* -------------------------------------------------------------------------- */
     /*                                  Constants                                 */
     /* -------------------------------------------------------------------------- */
@@ -117,23 +118,8 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
 
-    modifier onlyEntryPoint() {
-        _requireFromEntryPoint();
-        _;
-    }
-
-    modifier notFrozen() {
-        _requireNotFrozen();
-        _;
-    }
-
     modifier requireSupportedCollateral(address collateral) {
         _requireSupportedCollateral(collateral);
-        _;
-    }
-
-    modifier onlySFAccount(address account) {
-        _requireSFAccount(account);
         _;
     }
 
@@ -142,22 +128,16 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     /* -------------------------------------------------------------------------- */
 
     function __VaultPlugin_init(
-        address[] memory collaterals,
-        address[] memory priceFeeds,
+        VaultConfig memory vaultConfig,
+        CustomVaultConfig memory customVaultConfig,
         ISFEngine sfEngine,
-        address sfTokenAddress,
-        address entryPointAddress,
-        uint256 customCollateralRatio,
-        AutoTopUpConfig memory autoTopUpConfig
-    ) external onlyInitializing {
-        _updateSupportedCollaterals(collaterals, priceFeeds);
+        address sfTokenAddress
+    ) internal onlyInitializing {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
+        _updateVaultConfig(vaultConfig);
+        _updateCustomVaultConfig(customVaultConfig);
         $.sfEngine = sfEngine;
         $.sfTokenAddress = sfTokenAddress;
-        $.entryPointAddress = entryPointAddress;
-        $.customCollateralRatio = customCollateralRatio;
-        $.autoTopUpConfig = autoTopUpConfig;
-        _checkCustomAutoTopUpConfig(autoTopUpConfig.customConfig);
     }
 
     /// @inheritdoc IVaultPlugin
@@ -168,7 +148,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         external 
         override 
         onlyEntryPoint 
-        notFrozen 
+        requireNotFrozen 
         requireSupportedCollateral(collateralAddress)
     {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
@@ -184,7 +164,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         uint256 amountSFToMint = $.sfEngine.calculateSFTokensByCollateral(
             collateralAddress, 
             amountCollateral,
-            $.customCollateralRatio
+            $.customVaultConfig.collateralRatio
         );
         emit VaultPlugin__Invest(collateralAddress, amountCollateral, amountSFToMint);
         IERC20(collateralAddress).approve(address($.sfEngine), amountCollateral);
@@ -199,16 +179,16 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         external 
         override 
         onlyEntryPoint 
-        notFrozen 
+        requireNotFrozen 
         requireSupportedCollateral(collateralAddress)
     {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 amountSFToBurn = $.sfEngine.calculateSFTokensByCollateral(
             collateralAddress, 
             amountCollateralToRedeem,
-            $.customCollateralRatio
+            $.customVaultConfig.collateralRatio
         );
-        uint256 sfBalance = ISFAccount(address(this)).balance();
+        uint256 sfBalance = this.balance();
         if (amountSFToBurn > sfBalance) {
             revert VaultPlugin__InsufficientBalance(address(0), sfBalance, amountSFToBurn);
         }
@@ -225,12 +205,12 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         external 
         override 
         onlyEntryPoint 
-        notFrozen 
+        requireNotFrozen 
         onlySFAccount(account) 
         requireSupportedCollateral(collateralAddress)
     {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        uint256 sfBalance = ISFAccount(address(this)).balance();
+        uint256 sfBalance = this.balance();
         if (debtToCover > sfBalance) {
             revert VaultPlugin__InsufficientBalance(address(0), sfBalance, debtToCover);
         }
@@ -239,15 +219,27 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         $.sfEngine.liquidate(account, collateralAddress, debtToCover);
     }
 
+
     /// @inheritdoc IVaultPlugin
-    function updateCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) external override onlyEntryPoint {
-        _updateCustomAutoTopUpConfig(customConfig);
+    function getVaultConfig() external view override returns (VaultConfig memory vaultConfig) {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        return $.vaultConfig;
     }
 
     /// @inheritdoc IVaultPlugin
-    function getCustomAutoTopUpConfig() external view override returns (CustomAutoTopUpConfig memory customConfig) {
+    function updateVaultConfig(VaultConfig memory vaultConfig) external override {
+        _updateVaultConfig(vaultConfig);
+    }
+
+    /// @inheritdoc IVaultPlugin
+    function getCustomVaultConfig() external view override returns (CustomVaultConfig memory customConfig) {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        return $.autoTopUpConfig.customConfig;
+        return $.customVaultConfig;
+    }
+
+    /// @inheritdoc IVaultPlugin
+    function updateCustomVaultConfig(CustomVaultConfig memory customConfig) external override onlyEntryPoint {
+        _updateCustomVaultConfig(customConfig);
     }
 
     /// @inheritdoc IVaultPlugin
@@ -256,7 +248,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         uint256 collateralRatio, 
         uint256 liquidationThreshold
     ) {
-        return _checkCollateralSafety();
+        (, danger, collateralRatio, liquidationThreshold) =  _checkCollateralSafety();
     }
 
     /// @inheritdoc IVaultPlugin
@@ -277,7 +269,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         external 
         override 
         onlyEntryPoint 
-        notFrozen 
+        requireNotFrozen 
         requireSupportedCollateral(collateralAddress)
     {
         if (amount == 0) {
@@ -290,7 +282,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         }
         emit VaultPlugin__Deposit(collateralAddress, amount);
         bool success = IERC20(collateralAddress).transferFrom(
-            ISFAccount(address(this)).getOwner(), 
+            this.owner(), 
             address(this), 
             amount
         );
@@ -303,7 +295,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     function withdraw(
         address collateralAddress, 
         uint256 amount
-    ) external override onlyEntryPoint notFrozen {
+    ) external override onlyEntryPoint requireNotFrozen {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         if (collateralAddress == address(0)) {
             revert VaultPlugin__InvalidTokenAddress(collateralAddress);
@@ -317,7 +309,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
                 amount = getCollateralBalance(collateralAddress);
             } else {
                 revert VaultPlugin__InsufficientCollateral(
-                    ISFAccount(address(this)).getOwner(), 
+                    this.owner(), 
                     collateralAddress, 
                     collateralBalance, 
                     amount
@@ -331,10 +323,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
             }
         }
         emit VaultPlugin__Withdraw(collateralAddress, amount);
-        bool success = IERC20(collateralAddress).transfer(
-            ISFAccount(address(this)).getOwner(), 
-            amount
-        );
+        bool success = IERC20(collateralAddress).transfer(this.owner(), amount);
         if (!success) {
             revert VaultPlugin__TransferFailed();
         }
@@ -348,7 +337,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
     /// @inheritdoc IVaultPlugin
     function getCustomCollateralRatio() external view override returns (uint256) {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        return $.customCollateralRatio;
+        return $.customVaultConfig.collateralRatio;
     }
     
     /// @inheritdoc IVaultPlugin
@@ -362,8 +351,13 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         bool upkeepNeeded, 
         bytes memory performData
     ) {
-        (bool danger, uint256 collateralRatio, uint256 liquidationThreshold) = _checkCollateralSafety();
-        upkeepNeeded = danger;
+        (
+            bool autoTopUpNeeded, 
+            bool danger, 
+            uint256 collateralRatio, 
+            uint256 liquidationThreshold
+        ) = _checkCollateralSafety();
+        upkeepNeeded = autoTopUpNeeded;
         if (danger) {
             emit VaultPlugin__Danger(collateralRatio, liquidationThreshold);
         }
@@ -372,10 +366,10 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
 
     /// @inheritdoc AutomationCompatibleInterface
     function performUpkeep(bytes calldata /* performData */) external override {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        (bool danger, , ) = _checkCollateralSafety();
-        if (danger) {
-            _topUpToMaintainCollateralRatio($.autoTopUpConfig.customConfig.autoTopUpThreshold);
+        (bool autoTopUpNeeded, , , ) = _checkCollateralSafety();
+        if (autoTopUpNeeded) {
+            VaultPluginStorage storage $ = _getVaultPluginStorage();
+            _topUpToMaintainCollateralRatio($.customVaultConfig.autoTopUpThreshold);
         }
     }
 
@@ -389,24 +383,8 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         }
     }
 
-    function _updateSupportedCollaterals(
-        address[] memory collaterals, 
-        address[] memory priceFeeds
-    ) private {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if (collaterals.length != priceFeeds.length) {
-            revert VaultPlugin__MismatchBetweenCollateralAndPriceFeeds(
-                collaterals.length, 
-                priceFeeds.length
-            );
-        }
-        for (uint256 i = 0; i < collaterals.length; i++) {
-            $.supportedCollaterals[collaterals[i]] = priceFeeds[i];
-        }
-        emit VaultPlugin__CollateralAndPriceFeedUpdated(collaterals.length);
-    }
-
     function _checkCollateralSafety() private view returns (
+        bool autoTopUpNeeded,
         bool danger,
         uint256 collateralRatio, 
         uint256 liquidationThreshold
@@ -414,31 +392,32 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         liquidationThreshold = $.sfEngine.getMinimumCollateralRatio();
         collateralRatio = $.sfEngine.getCollateralRatio(address(this));
-        uint256 autoTopUpThreshold = $.autoTopUpConfig.customConfig.autoTopUpThreshold;
+        uint256 autoTopUpThreshold = $.customVaultConfig.autoTopUpThreshold;
         if (collateralRatio < autoTopUpThreshold) {
             danger = true;
         }
+        autoTopUpNeeded = $.customVaultConfig.autoTopUpEnabled && danger;
     }
 
-    function _topUpCollateral(address collateralAddress, uint256 amount) private {
+    function _topUpCollateral(address collateralAddress, uint256 amountCollateral) private {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 collateralBalance = _getCollateralBalance(collateralAddress);
-        if (collateralBalance < amount) {
+        if (collateralBalance < amountCollateral) {
             revert VaultPlugin__InsufficientCollateral(
                 address($.sfEngine), 
                 collateralAddress, 
                 collateralBalance, 
-                amount
+                amountCollateral
             );
         }
-        emit VaultPlugin__TopUpCollateral(collateralAddress, amount);
-        IERC20(collateralAddress).approve(address($.sfEngine), amount);
-        $.sfEngine.depositCollateralAndMintSFToken(collateralAddress, amount, 0);
+        emit VaultPlugin__TopUpCollateral(collateralAddress, amountCollateral);
+        IERC20(collateralAddress).approve(address($.sfEngine), amountCollateral);
+        $.sfEngine.depositCollateralAndMintSFToken(collateralAddress, amountCollateral, 0);
     }
 
     function _topUpToMaintainCollateralRatio(uint256 targetCollateralRatio) private {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        uint256 sfDebt = _getSFDebt();
+        uint256 sfDebt = this.debt();
         uint256 currentCollateralInUsd = $.sfEngine.getTotalCollateralValueInUsd(address(this));
         uint256 requiredCollateralInUsd = sfDebt * targetCollateralRatio / PRECISION_FACTOR;
         if (currentCollateralInUsd >= requiredCollateralInUsd) {
@@ -447,7 +426,7 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         uint256 collateralToTopUpInUsd = requiredCollateralInUsd - currentCollateralInUsd;
         address[] memory collaterals = $.depositedCollaterals.values();
         for (uint256 i = 0; i < collaterals.length && collateralToTopUpInUsd > 0; i++) {
-            address priceFeed = $.supportedCollaterals[collaterals[i]];
+            address priceFeed = $.supportedCollaterals.get(collaterals[i]);
             uint256 collateralBalance = _getCollateralBalance(collaterals[i]);
             if (priceFeed == address(0) || collateralBalance == 0) {
                 continue;
@@ -474,54 +453,70 @@ contract VaultPlugin is IVaultPlugin, AutomationCompatible, Initializable {
         emit VaultPlugin__CollateralRatioMaintained(collateralToTopUpInUsd, targetCollateralRatio);
     }
 
-    function _getSFDebt() private view returns (uint256) {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        return $.sfEngine.getSFDebt(address(this));
-    }
-
     function _getCollateralBalance(address collateralAddress) private view returns (uint256) {
         return IERC20(collateralAddress).balanceOf(address(this));
     }
 
-    function _updateCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) private {
+    function _updateVaultConfig(VaultConfig memory vaultConfig) internal {
+        _checkVaultConfig(vaultConfig);
+        _updateSupportedCollaterals(vaultConfig.collaterals, vaultConfig.priceFeeds);
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        _checkCustomAutoTopUpConfig(customConfig);
-        $.autoTopUpConfig.customConfig = customConfig;
+        $.vaultConfig = vaultConfig;
+        bytes memory configBytes = abi.encode(vaultConfig);
+        emit VaultPlugin__UpdateVaultConfig(configBytes);
+    }
+
+    function _checkVaultConfig(VaultConfig memory vaultConfig) private pure {
+        if (vaultConfig.collaterals.length != vaultConfig.priceFeeds.length) {
+            revert VaultPlugin__MismatchBetweenCollateralAndPriceFeeds(
+                vaultConfig.collaterals.length, 
+                vaultConfig.priceFeeds.length
+            );
+        }
+    }
+
+    function _updateSupportedCollaterals(
+        address[] memory collaterals, 
+        address[] memory priceFeeds
+    ) internal {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        if (collaterals.length != priceFeeds.length) {
+            revert VaultPlugin__MismatchBetweenCollateralAndPriceFeeds(
+                collaterals.length, 
+                priceFeeds.length
+            );
+        }
+        $.supportedCollaterals.clear();
+        for (uint256 i = 0; i < collaterals.length; i++) {
+            $.supportedCollaterals.set(collaterals[i], priceFeeds[i]);
+        }
+        emit VaultPlugin__UpdateCollateralAndPriceFeed(collaterals.length);
+    }
+
+    function _updateCustomVaultConfig(CustomVaultConfig memory customConfig) private {
+        _checkCustomVaultConfig(customConfig);
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        $.customVaultConfig = customConfig;
         bytes memory configBytes = abi.encode(customConfig);
-        emit VaultPlugin__UpdateCustomAutoTopUpConfig(customConfig.autoTopUpEnabled, configBytes);
+        emit VaultPlugin__UpdateCustomVaultConfig(configBytes);
     }
 
-    function _checkCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) private view {
+    function _checkCustomVaultConfig(CustomVaultConfig memory customConfig) private view {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        uint256 liquidationThreshold = $.sfEngine.getMinimumCollateralRatio();
-        if (customConfig.autoTopUpThreshold < liquidationThreshold) {
-            revert VaultPlugin__TopUpThresholdTooSmall(customConfig.autoTopUpThreshold, liquidationThreshold);
+        uint256 minCollateralRatio = $.sfEngine.getMinimumCollateralRatio();
+        if (customConfig.autoTopUpThreshold < minCollateralRatio) {
+            revert VaultPlugin__TopUpThresholdTooSmall(customConfig.autoTopUpThreshold, minCollateralRatio);
         }
-    }
-
-    function _requireFromEntryPoint() private view {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if (msg.sender != $.entryPointAddress) {
-            revert VaultPlugin__NotFromEntryPoint();
-        }
-    }
-
-    function _requireNotFrozen() private view {
-        if (ISFAccount(address(this)).isFrozen()) {
-            revert VaultPlugin__AccountIsFrozen();
+        if (customConfig.collateralRatio < minCollateralRatio) {
+            revert VaultPlugin__CustomCollateralRatioTooSmall(customConfig.collateralRatio, minCollateralRatio);
         }
     }
 
     function _requireSupportedCollateral(address collateral) private view {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if ($.supportedCollaterals[collateral] == address(0)) {
+        if (!$.supportedCollaterals.contains(collateral)) {
             revert VaultPlugin__CollateralNotSupported(collateral);
         }
     }
 
-    function _requireSFAccount(address account) private view {
-        if (!account.supportsInterface(type(ISFAccount).interfaceId)) {
-            revert VaultPlugin__NotSFAccount(account);
-        }
-    }
 }

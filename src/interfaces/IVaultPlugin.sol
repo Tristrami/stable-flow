@@ -3,13 +3,15 @@ pragma solidity ^0.8.30;
 
 interface IVaultPlugin {
 
-    struct CustomAutoTopUpConfig {
-        bool autoTopUpEnabled; // Whether this account supports collateral auto top up
-        uint256 autoTopUpThreshold; // The collateral ratio threshold for auto top up
+    struct VaultConfig {
+        address[] collaterals; // Supported collaterals
+        address[] priceFeeds; // Collateral correlated price feeds
     }
 
-    struct AutoTopUpConfig {
-        CustomAutoTopUpConfig customConfig;
+    struct CustomVaultConfig {
+        uint256 collateralRatio; // The collateral ration used to invest, must be greater than or equal to the minimum collateral ratio supported by SFEngine
+        bool autoTopUpEnabled; // Whether this account supports collateral auto top up
+        uint256 autoTopUpThreshold; // The collateral ratio threshold for auto top up
     }
 
     /**
@@ -41,9 +43,13 @@ interface IVaultPlugin {
      */
     function liquidate(address account, address collateralAddress, uint256 debtToCover) external;
 
-    function updateCustomAutoTopUpConfig(CustomAutoTopUpConfig memory customConfig) external;
+    function getVaultConfig() external view returns (VaultConfig memory vaultConfig);
 
-    function getCustomAutoTopUpConfig() external returns (CustomAutoTopUpConfig memory customConfig);
+    function updateVaultConfig(VaultConfig memory vaultConfig) external;
+
+    function getCustomVaultConfig() external view returns (CustomVaultConfig memory customConfig);
+
+    function updateCustomVaultConfig(CustomVaultConfig memory customConfig) external;
 
     function checkCollateralSafety() external view returns (bool danger, uint256 collateralRatio, uint256 liquidationThreshold);
 

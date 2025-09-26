@@ -3,16 +3,15 @@ pragma solidity ^0.8.30;
 
 interface ISocialRecoveryPlugin {
 
+    struct RecoveryConfig {
+        uint8 maxGuardians; // Max number of guardians that can be added
+    }
+
     struct CustomRecoveryConfig {
         bool socialRecoveryEnabled; // Whether this account supports social recovery
         uint8 minGuardianApprovals; // Minimum amount of guardian approvals needed to recover the current account
         uint256 recoveryTimeLock; // Social recovery time lock, recovery can only be executed after a delay
         address[] guardians; // Guardian addresses for social recovery
-    }
-
-    struct RecoveryConfig {
-        uint8 maxGuardians; // Max number of guardians that can be added
-        CustomRecoveryConfig customConfig;
     }
 
     struct RecoveryRecord {
@@ -28,9 +27,13 @@ interface ISocialRecoveryPlugin {
 
     function supportsSocialRecovery() external view returns (bool);
 
-    function updateCustomRecoveryConfig(CustomRecoveryConfig memory customConfig) external;
+    function getRecoveryConfig() external view returns (RecoveryConfig memory customConfig);
+
+    function updateSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) external;
 
     function getCustomRecoveryConfig() external returns (CustomRecoveryConfig memory customConfig);
+
+    function updateCustomRecoveryConfig(CustomRecoveryConfig memory customConfig) external;
 
     function initiateRecovery(address account, address newOwner) external;
 

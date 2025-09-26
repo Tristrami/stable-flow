@@ -469,7 +469,7 @@ contract SFEngineTest is Test, Constants {
     }
 
     function testS() public {
-        bytes32 b = keccak256(abi.encode(uint256(keccak256("stableflow.storage.VaultPlugin")) - 1)) & ~bytes32(uint256(0xff));
+        bytes32 b = keccak256(abi.encode(uint256(keccak256("stableflow.storage.SocialRecoveryPlugin")) - 1)) & ~bytes32(uint256(0xff));
         console2.logBytes32(b);
     }
 }
