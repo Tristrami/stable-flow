@@ -264,11 +264,6 @@ abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCo
     }
 
     /// @inheritdoc IVaultPlugin
-    function updateVaultConfig(VaultConfig memory vaultConfig) external override {
-        _updateVaultConfig(vaultConfig);
-    }
-
-    /// @inheritdoc IVaultPlugin
     function getCustomVaultConfig() external view override returns (CustomVaultConfig memory customConfig) {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         return $.customVaultConfig;

@@ -36,8 +36,8 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     error SocialRecoveryPlugin__ApprovalExceedsGuardianAmount(uint256 approvals, uint256 numGuardians);
     error SocialRecoveryPlugin__AccountIsInRecoveryProcess();
     error SocialRecoveryPlugin__NoGuardianSet();
-    error SocialRecoveryPlugin__MinGuardianApprovalsIsNotSet();
     error SocialRecoveryPlugin__MinGuardianApprovalsCanNotBeZero();
+    error SocialRecoveryPlugin__MaxGuardiansCanNotBeZero();
     error SocialRecoveryPlugin__OnlyGuardian();
     error SocialRecoveryPlugin__TooManyGuardians(uint256 maxGuardians);
     error SocialRecoveryPlugin__GuardianAlreadyExists(address guardian);
@@ -135,11 +135,9 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         CustomRecoveryConfig memory customRecoveryConfig,
         ISFEngine sfEngine
     ) internal {
-        _checkSocialRecoveryConfig(recoveryConfig);
-        _checkCustomSocialRecoveryConfig(customRecoveryConfig);
+        _updateSocialRecoveryConfig(recoveryConfig);
+        _updateCustomSocialRecoveryConfig(customRecoveryConfig);
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
-        $.recoveryConfig = recoveryConfig;
-        $.customRecoveryConfig = customRecoveryConfig;
         $.sfEngine = sfEngine;
     }
 
@@ -154,11 +152,6 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         return $.recoveryConfig;
     }
 
-    /// @inheritdoc ISocialRecoveryPlugin
-    function updateSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) external override onlyEntryPoint {
-        _updateSocialRecoveryConfig(recoveryConfig);
-    }
-    
     /// @inheritdoc ISocialRecoveryPlugin
     function getCustomRecoveryConfig() external view override returns (CustomRecoveryConfig memory customConfig) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
@@ -178,11 +171,11 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         requireNotFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveRecoveryInitiation(newOwner);
+        ISFAccount(account).receiveInitiateRecover(newOwner);
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function receiveRecoveryInitiation(address newOwner) 
+    function receiveInitiateRecover(address newOwner) 
         external 
         override 
         onlyGuardian 
@@ -194,6 +187,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         RecoveryRecord memory recoveryRecord = RecoveryRecord({
             isCompleted: false,
             isCancelled: false,
+            completedBy: address(0),
             cancelledBy: address(0),
             previousOwner: this.owner(),
             newOwner: newOwner,
@@ -218,7 +212,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function receiveApproveRecovery() external override onlyGuardian requireNotFrozen recoverable {
+    function receiveApproveRecovery() external override onlyGuardian recoverable {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         recoveryRecord.approvedGuardians.push(msg.sender);
@@ -226,7 +220,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         bool approvalIsSufficient = recoveryRecord.approvedGuardians.length >= $.customRecoveryConfig.minGuardianApprovals;
         bool executableTimeReached = block.timestamp >= recoveryRecord.executableTime;
         if (approvalIsSufficient && executableTimeReached) {
-            _completeRecovery();
+            _completeRecovery(msg.sender);
         }
     }
 
@@ -242,7 +236,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function receiveCancelRecovery() external override onlyGuardian requireNotFrozen recoverable {
+    function receiveCancelRecovery() external override onlyGuardian recoverable {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         recoveryRecord.isCancelled = true;
         recoveryRecord.cancelledBy = msg.sender;
@@ -262,8 +256,8 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function receiveCompleteRecovery() external override onlyGuardian requireNotFrozen recoverable {
-        _completeRecovery();
+    function receiveCompleteRecovery() external override onlyGuardian recoverable {
+        _completeRecovery(msg.sender);
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -314,14 +308,16 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
         emit SocialRecoveryPlugin__UpdateRecoveryConfig(abi.encode(recoveryConfig));
     }
 
-    function _checkSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) private view {
-
+    function _checkSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) private pure {
+        if (recoveryConfig.maxGuardians == 0) {
+            revert SocialRecoveryPlugin__MaxGuardiansCanNotBeZero();
+        }
     }
 
     function _updateCustomSocialRecoveryConfig(CustomRecoveryConfig memory customConfig) internal {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
+        _updateGuardians(customConfig.guardians);
         $.customRecoveryConfig = customConfig;
-
         emit SocialRecoveryPlugin__UpdateCustomRecoveryConfig(abi.encode(customConfig));
     }
 
@@ -333,7 +329,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
             _requireNotRecovering();
         }
         if (customConfig.minGuardianApprovals == 0) {
-            revert SocialRecoveryPlugin__MinGuardianApprovalsIsNotSet();
+            revert SocialRecoveryPlugin__MinGuardianApprovalsCanNotBeZero();
         }
         if (customConfig.guardians.length == 0) {
             revert SocialRecoveryPlugin__NoGuardianSet();
@@ -378,7 +374,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
             : latestRecord;
     }
 
-    function _completeRecovery() private {
+    function _completeRecovery(address completedBy) private {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         uint256 currentApprovals = recoveryRecord.approvedGuardians.length;
@@ -390,6 +386,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
             revert SocialRecoveryPlugin__RecoveryNotExecutable(recoveryRecord.executableTime);
         }
         recoveryRecord.isCompleted = true;
+        recoveryRecord.completedBy = completedBy;
         this.transferOwnership(recoveryRecord.newOwner);
         emit SocialRecoveryPlugin__RecoveryCompleted(recoveryRecord.previousOwner, recoveryRecord.newOwner);
     }
@@ -426,5 +423,4 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, BaseSFAccountPl
             revert SocialRecoveryPlugin__SocialRecoveryNotSupported();
         }
     }
-
 }

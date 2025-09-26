@@ -96,14 +96,6 @@ interface IVaultPlugin {
     function getVaultConfig() external view returns (VaultConfig memory vaultConfig);
 
     /**
-     * @dev Update the vault configuration
-     * @param vaultConfig The new vault configuration
-     * @notice This will update the entire vault configuration
-     * @notice Only callable by authorized addresses (internal _updateVaultConfig handles permissions)
-     */
-    function updateVaultConfig(VaultConfig memory vaultConfig) external;
-
-    /**
      * @dev Get the custom vault configuration
      * @return customConfig The current custom vault configuration
      * @notice Returns the custom configuration parameters for this specific vault

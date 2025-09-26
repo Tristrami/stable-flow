@@ -40,6 +40,8 @@ interface ISocialRecoveryPlugin {
         bool isCompleted;
         /// @dev Flag indicating if recovery was cancelled
         bool isCancelled;
+        /// @dev Address of the guardian who completed the recovery
+        address completedBy;
         /// @dev Address of the guardian who cancelled the recovery
         address cancelledBy;
         /// @dev Original owner address before recovery initiation
@@ -65,13 +67,6 @@ interface ISocialRecoveryPlugin {
      * @return customConfig The current RecoveryConfig settings
      */
     function getRecoveryConfig() external view returns (RecoveryConfig memory customConfig);
-
-    /**
-     * @dev Updates the social recovery configuration
-     * @param recoveryConfig New recovery configuration parameters
-     * @notice Only callable by the entry point (onlyEntryPoint modifier)
-     */
-    function updateSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) external;
 
     /**
      * @dev Gets the custom recovery configuration
@@ -108,7 +103,7 @@ interface ISocialRecoveryPlugin {
      * - Not already in recovery (notRecovering)
      * @notice Creates a new recovery record and freezes the account
      */
-    function receiveRecoveryInitiation(address newOwner) external;
+    function receiveInitiateRecover(address newOwner) external;
 
     /**
      * @dev Approves a recovery process for an account
