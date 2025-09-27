@@ -30,6 +30,7 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
  * @notice Inherits from:
  * - VaultPlugin (collateral management)
  * - SocialRecoveryPlugin (guardian recovery)
+ * - FreezePlugin (Account freezing support)
  * - BaseAccount (ERC-4337 core)
  * - ERC165 (interface detection)
  */
@@ -44,37 +45,12 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     error SFAccount__InvalidAddress();
     error SFAccount__InvalidTokenAmount();
     error SFAccount__TransferFailed();
-    error SFAccount__AccountIsFrozen();
-    error SFAccount__AccountIsNotFrozen();
 
     /* -------------------------------------------------------------------------- */
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
 
     event SFAccount__AccountCreated(address indexed owner);
-    event SFAccount__FreezeAccount(address indexed frozenBy);
-    event SFAccount__UnfreezeAccount(address indexed unfrozenBy);
-
-    /* -------------------------------------------------------------------------- */
-    /*                                    Types                                   */
-    /* -------------------------------------------------------------------------- */
-
-    /**
-     * @dev Record tracking account freeze/unfreeze events
-     * @notice Used for security auditing and account state history tracking
-     * @notice Maintains complete lifecycle of each freeze operation
-     */
-    struct FreezeRecord {
-        /// @dev Address that initiated the freeze operation
-        /// @notice Typically the EntryPoint or guardians
-        address frozenBy;
-        /// @dev Address that executed unfreeze operation
-        /// @notice Zero address (0x0) indicates still frozen state
-        address unfrozenBy;
-        /// @dev Current state flag for this freeze record
-        /// @notice true = unfrozen, false = currently frozen
-        bool isUnfozen;
-    }
 
     /* -------------------------------------------------------------------------- */
     /*                               State Variables                              */
@@ -100,16 +76,6 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     /// @notice May be used for factory-specific account verification
     address private accountFactoryAddress;
 
-    /// @dev Account frozen status flag
-    /// @notice When true, restricts most account operations
-    /// @notice Only modifiable by privileged contracts (EntryPoint)
-    bool private frozen;
-
-    /// @dev Historical record of account freeze events
-    /// @notice Contains timestamps and reasons for each freeze/unfreeze
-    /// @notice Helps track account security history and compliance
-    FreezeRecord[] private freezeRecords;
-
     /* -------------------------------------------------------------------------- */
     /*                                Initializers                                */
     /* -------------------------------------------------------------------------- */
@@ -127,6 +93,7 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
         // Upgradeable init
         __AccessControl_init();
         __Ownable_init(_accountOwner);
+        __FreezePlugin_init();
         __VaultPlugin_init(
             _vaultConfig,
             _customVaultConfig, 
@@ -143,7 +110,6 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
         sfEngine = ISFEngine(_sfEngineAddress);
         sfTokenAddress = sfEngine.getSFTokenAddress();
         accountFactoryAddress = _accountFactoryAddress;
-        frozen = false;
     }
 
     function reinitialize(
@@ -199,26 +165,6 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
         }
     }
 
-    /// @inheritdoc ISFAccount
-    function freeze() external override onlyEntryPoint {
-        _freezeAccount(owner());
-    }
-
-    /// @inheritdoc ISFAccount
-    function unfreeze() external override onlyEntryPoint {
-        _unfreezeAccount(owner());
-    }
-
-    /// @inheritdoc ISFAccount
-    function isFrozen() external view override returns (bool) {
-        return frozen;
-    }
-
-    /// @inheritdoc BaseAccount
-    function entryPoint() public view override returns (IEntryPoint) {
-        return IEntryPoint(entryPointAddress);
-    }
-
     /// @inheritdoc BaseAccount
     function execute(address /* target */, uint256 /* value */, bytes calldata /* data */) external pure override {
         revert SFAccount__OperationNotSupported();
@@ -227,6 +173,11 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     /// @inheritdoc BaseAccount
     function executeBatch(Call[] calldata /* calls */) external pure override {
         revert SFAccount__OperationNotSupported();
+    }
+
+    /// @inheritdoc BaseAccount
+    function entryPoint() public view override returns (IEntryPoint) {
+        return IEntryPoint(entryPointAddress);
     }
 
     /// @inheritdoc ERC165
@@ -245,26 +196,6 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     ) internal view override returns (uint256 validationData) {
         address signer = ECDSA.recover(userOpHash, userOp.signature);
         return signer == owner() ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
-    }
-
-    function _freezeAccount(address frozenBy) private {
-        _requireNotFrozen();
-        frozen = true;
-        FreezeRecord memory freezeRecord = FreezeRecord({
-            frozenBy: frozenBy,
-            unfrozenBy: address(0),
-            isUnfozen: false
-        });
-        freezeRecords.push(freezeRecord);
-        emit SFAccount__FreezeAccount(frozenBy);
-    }
-
-    function _unfreezeAccount(address unfrozenBy) private {
-        _requireFrozen();
-        FreezeRecord storage freezeRecord = freezeRecords[freezeRecords.length - 1];
-        freezeRecord.isUnfozen = true;
-        freezeRecord.unfrozenBy = unfrozenBy;
-        emit SFAccount__UnfreezeAccount(unfrozenBy);
     }
 
     function _getSFTokenBalance() private view returns (uint256) {

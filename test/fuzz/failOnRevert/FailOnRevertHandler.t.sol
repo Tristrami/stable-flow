@@ -32,7 +32,7 @@ contract FailOnRevertHandler is Test {
         sfEngine.getSFTokenAddress();
     }
 
-    function getCollateralTokenAddresses() public {
-        sfEngine.getCollateralTokenAddresses();
+    function getSupportedCollaterals() public {
+        sfEngine.getSupportedCollaterals();
     }
 }

@@ -115,11 +115,11 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
 
     /// @dev Nested mapping tracking user collateral balances
     /// @notice Format: user address => token address => amount
-    mapping(address user => mapping(address tokenAddress => uint256 value)) private collaterals;
+    mapping(address user => mapping(address collateralAddress => uint256 value)) private collaterals;
 
     /// @dev Mapping of collateral tokens to Chainlink price feeds
     /// @notice Used for real-time price lookups and USD conversions
-    mapping(address tokenAddress => address priceFeedAddress) private priceFeeds;
+    mapping(address collateralAddress => address priceFeedAddress) private priceFeeds;
 
     /// @dev Tracks SF token debt per user
     /// @notice Represents outstanding minted SF tokens that must be collateralized
@@ -207,7 +207,7 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         if (debtToCover > liquidatorBalance) {
             debtToCover = liquidatorBalance;
         }
-        uint256 amountCollateralToLiquidate = _getTokenAmountFromUsd(collateralAddress, debtToCover);
+        uint256 amountCollateralToLiquidate = _getTokenAmountForUsd(collateralAddress, debtToCover);
         uint256 amountDeposited = collaterals[user][collateralAddress];
         if (amountCollateralToLiquidate > amountDeposited) {
             amountCollateralToLiquidate = amountDeposited;
@@ -240,7 +240,7 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         uint256 collateralRatio
     ) external view override returns (uint256) {
         uint256 collateralInUsd = _getTokenValueInUsd(collateralAddress, amountCollateral);
-        return collateralInUsd * collateralRatio / PRECISION_FACTOR;
+        return collateralInUsd * PRECISION_FACTOR / collateralRatio;
     }
 
     /// @inheritdoc ISFEngine
@@ -319,21 +319,21 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
     }
 
     function _getTokenValueInUsd(
-        address tokenAddress, 
+        address collateralAddress, 
         uint256 amountToken
-    ) private view requireSupportedCollateral(tokenAddress) returns (uint256) {
-        return AggregatorV3Interface(priceFeeds[tokenAddress]).getTokenValue(amountToken);
+    ) private view requireSupportedCollateral(collateralAddress) returns (uint256) {
+        return AggregatorV3Interface(priceFeeds[collateralAddress]).getTokenValue(amountToken);
     }
 
-    function _getTokenAmountFromUsd(
-        address tokenAddress, 
+    function _getTokenAmountForUsd(
+        address collateralAddress, 
         uint256 amountUsd
-    ) private view requireSupportedCollateral(tokenAddress) returns (uint256) {
-        return AggregatorV3Interface(priceFeeds[tokenAddress]).getTokensForValue(amountUsd);
+    ) private view requireSupportedCollateral(collateralAddress) returns (uint256) {
+        return AggregatorV3Interface(priceFeeds[collateralAddress]).getTokensForValue(amountUsd);
     }
 
-    function _getTokenUsdPrice(address tokenAddress) private view requireSupportedCollateral(tokenAddress) returns (uint256) {
-        return AggregatorV3Interface(priceFeeds[tokenAddress]).getPrice();
+    function _getTokenUsdPrice(address collateralAddress) private view requireSupportedCollateral(collateralAddress) returns (uint256) {
+        return AggregatorV3Interface(priceFeeds[collateralAddress]).getPrice();
     }
 
     function _burnSFToken(
@@ -382,9 +382,9 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
     function _getTotalCollateralValueInUsd(address user) private view returns (uint256) {
         uint256 totalCollateralValueInUsd;
         for (uint256 i = 0; i < supportedCollaterals.length(); i++) {
-            address tokenAddress = supportedCollaterals.at(i);
-            uint256 amountCollateral = collaterals[user][tokenAddress];
-            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
+            address collateralAddress = supportedCollaterals.at(i);
+            uint256 amountCollateral = collaterals[user][collateralAddress];
+            totalCollateralValueInUsd += _getTokenValueInUsd(collateralAddress, amountCollateral);
         }
         return totalCollateralValueInUsd;
     }
@@ -402,9 +402,9 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         }
         uint256 totalCollateralValueInUsd;
         for (uint256 i = 0; i < supportedCollaterals.length(); i++) {
-            address tokenAddress = supportedCollaterals.at(i);
-            uint256 amountCollateral = collaterals[user][tokenAddress];
-            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
+            address collateralAddress = supportedCollaterals.at(i);
+            uint256 amountCollateral = collaterals[user][collateralAddress];
+            totalCollateralValueInUsd += _getTokenValueInUsd(collateralAddress, amountCollateral);
         }
         return totalCollateralValueInUsd * PRECISION_FACTOR / sfDebt;
     }

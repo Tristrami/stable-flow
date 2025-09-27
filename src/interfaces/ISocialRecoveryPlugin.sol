@@ -36,6 +36,8 @@ interface ISocialRecoveryPlugin {
      * @notice Tracks the state and progress of an ongoing recovery attempt
      */
     struct RecoveryRecord {
+        /// @dev Address of the guardian who initiated the recovery
+        address initiator;
         /// @dev Flag indicating if recovery was successfully completed
         bool isCompleted;
         /// @dev Flag indicating if recovery was cancelled

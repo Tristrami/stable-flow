@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {BaseSFAccountPlugin} from "./BaseSFAccountPlugin.sol";
+import {FreezePlugin} from "./FreezePlugin.sol";
 import {IVaultPlugin} from "../../interfaces/IVaultPlugin.sol";
 import {ISFEngine} from "../../interfaces/ISFEngine.sol";
 import {OracleLib, AggregatorV3Interface} from "../../libraries/OracleLib.sol";
@@ -30,7 +30,7 @@ import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/autom
  * - BaseSFAccountPlugin (base plugin functionality) 
  * - AutomationCompatible (Chainlink Automation)
  */
-abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCompatible {
+abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatible {
 
     using OracleLib for AggregatorV3Interface;
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -161,7 +161,7 @@ abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCo
     }
 
     /* -------------------------------------------------------------------------- */
-    /*                         External / Public Functions                        */
+    /*                                 Initializer                                */
     /* -------------------------------------------------------------------------- */
 
     function __VaultPlugin_init(
@@ -176,6 +176,10 @@ abstract contract VaultPlugin is IVaultPlugin, BaseSFAccountPlugin, AutomationCo
         $.sfEngine = sfEngine;
         $.sfTokenAddress = sfTokenAddress;
     }
+
+    /* -------------------------------------------------------------------------- */
+    /*                         External / Public Functions                        */
+    /* -------------------------------------------------------------------------- */
 
     /// @inheritdoc IVaultPlugin
     function invest(

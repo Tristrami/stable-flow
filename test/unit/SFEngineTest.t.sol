@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import {Test, console2} from "forge-std/Test.sol";
 import {SFEngine} from "../../src/token/SFEngine.sol";
 import {SFToken} from "../../src/token/SFToken.sol";
-import {Validator} from "../../src/token/Validator.sol";
 import {DeploySFEngine} from "../../script/DeploySFEngine.s.sol";
 import {Constants} from "../../script/util/Constants.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
@@ -33,24 +32,23 @@ contract SFEngineTest is Test, Constants {
     address[] private priceFeedAddresses;
 
     event SFEngine__CollateralDeposited(
-        address indexed user, address indexed collateralTokenAddress, uint256 indexed amountCollateral
+        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
     event SFEngine__CollateralRedeemed(
-        address indexed user, address indexed collateralTokenAddress, uint256 indexed amountCollateral
+        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
     event SFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
 
-    modifier depositedCollateral(address tokenAddress, uint256 collateralRatio) {
-        IERC20 collateralToken = IERC20(tokenAddress);
+    modifier depositedCollateral(address collateralAddress, uint256 collateralRatio) {
+        IERC20 collateral = IERC20(collateralAddress);
         vm.startPrank(user);
-        collateralToken.approve(address(sfEngine), INITIAL_USER_BALANCE);
+        collateral.approve(address(sfEngine), INITIAL_USER_BALANCE);
         uint256 amountToMint = sfEngine.calculateSFTokensByCollateral(
-            tokenAddress, 
+            collateralAddress, 
             DEFAULT_AMOUNT_COLLATERAL, 
             collateralRatio
         );
-        sfToken.approve(address(sfEngine), amountToMint);
-        sfEngine.depositCollateralAndMintSFToken(tokenAddress, DEFAULT_AMOUNT_COLLATERAL, amountToMint);
+        sfEngine.depositCollateralAndMintSFToken(collateralAddress, DEFAULT_AMOUNT_COLLATERAL, amountToMint);
         vm.stopPrank();
         _;
     }
@@ -93,19 +91,19 @@ contract SFEngineTest is Test, Constants {
             deployConfig.wethPriceFeedAddress
         ).getTokensForValue(2 * WETH_USD_PRICE.convert());
         uint256 amountBtc = AggregatorV3Interface(
-            deployConfig.wbtcTokenAddress
+            deployConfig.wbtcPriceFeedAddress
         ).getTokensForValue(2 * WBTC_USD_PRICE.convert());
         uint256 expectedTokenAmount = 2;
-        assertEq(amountEth, expectedTokenAmount.convert(PRECISION));
-        assertEq(amountBtc, expectedTokenAmount.convert(PRECISION));
+        assertEq(amountEth, expectedTokenAmount.convert(0, PRECISION));
+        assertEq(amountBtc, expectedTokenAmount.convert(0, PRECISION));
     }
 
     function testGetSFTokenAmountByCollateral() public view {
         uint256 ethAmount = 2 ether;
         uint256 collateralRatio = 2 * PRECISION_FACTOR;
         uint256 sfAmount = sfEngine.calculateSFTokensByCollateral(deployConfig.wethTokenAddress, ethAmount, collateralRatio);
-        uint256 expectedEthInUsd = ethAmount * WETH_USD_PRICE.convert() / PRECISION_FACTOR;
-        uint256 expectedSFAmount = expectedEthInUsd * sfEngine.getMinimumCollateralRatio() / PRECISION_FACTOR;
+        uint256 ethInUsd = ethAmount * WETH_USD_PRICE.convert() / PRECISION_FACTOR;
+        uint256 expectedSFAmount = ethInUsd * PRECISION_FACTOR / collateralRatio;
         assertEq(sfAmount, expectedSFAmount);
     }
 
@@ -127,17 +125,14 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_DepositCollateralParamIsInvalid() public {
         // Zero address
-        vm.expectRevert(abi.encodeWithSelector(Validator.Validator__InvalidAddress.selector, address(0)));
+        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__CollateralNotSupported.selector, address(0)));
         sfEngine.depositCollateralAndMintSFToken(address(0), 1 ether, 1 ether);
         // Zero amount of collateral
-        vm.expectRevert(abi.encodeWithSelector(Validator.Validator__ValueCanNotBeZero.selector, 0));
-        sfEngine.depositCollateralAndMintSFToken(address(1), 0 ether, 1 ether);
-        // Zero amount of sf to mint
-        vm.expectRevert(abi.encodeWithSelector(Validator.Validator__ValueCanNotBeZero.selector, 0));
-        sfEngine.depositCollateralAndMintSFToken(address(1), 1 ether, 0);
+        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__AmountCollateralToDepositCanNotBeZero.selector, 0));
+        sfEngine.depositCollateralAndMintSFToken(deployConfig.wethTokenAddress, 0 ether, 1 ether);
         // Unsupported token
         ERC20Mock token = new ERC20Mock("TEST", "TEST", msg.sender, 10);
-        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__TokenNotSupported.selector, address(token)));
+        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__CollateralNotSupported.selector, address(token)));
         sfEngine.depositCollateralAndMintSFToken(address(token), 1 ether, 1 ether);
     }
 
@@ -199,16 +194,18 @@ contract SFEngineTest is Test, Constants {
     {
         vm.startPrank(user);
         uint256 amountDeposited = sfEngine.getCollateralAmount(user, deployConfig.wethTokenAddress);
-        uint256 amountToMint = sfEngine.calculateSFTokensByCollateral(
+        uint256 amountToBurn = sfEngine.calculateSFTokensByCollateral(
             deployConfig.wethTokenAddress, 
-            DEFAULT_AMOUNT_COLLATERAL, 
+            amountDeposited, 
             DEFAULT_COLLATERAL_RATIO
         );
+        uint256 amountToRedeem = amountDeposited + 1 ether;
+        sfToken.approve(address(sfEngine), amountToBurn);
         vm.expectRevert(
             abi.encodeWithSelector(SFEngine.SFEngine__AmountToRedeemExceedsDeposited.selector, amountDeposited)
         );
         sfEngine.redeemCollateral(
-            deployConfig.wethTokenAddress, DEFAULT_AMOUNT_COLLATERAL + 1 ether, amountToMint
+            deployConfig.wethTokenAddress, amountToRedeem, amountToBurn
         );
     }
 
@@ -298,8 +295,9 @@ contract SFEngineTest is Test, Constants {
         // Calculate expected collateral ratio after redeem
         uint256 amountSFLeft = sfEngine.getSFDebt(user) - minimumAmountSFToBurn;
         console2.log("amountSFLeft:", amountSFLeft);
-        uint256 amountCollateralLeftInUsd =
-             AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(amountCollateralLeft);
+        uint256 amountCollateralLeftInUsd = AggregatorV3Interface(
+            deployConfig.wethPriceFeedAddress
+        ).getTokenValue(amountCollateralLeft);
         console2.log("amountCollateralLeftInUsd:", amountCollateralLeftInUsd);
         uint256 expectedCollateralRatioAfterRedeem = (amountCollateralLeftInUsd * PRECISION_FACTOR) / amountSFLeft;
         console2.log("expectedCollateralRatioAfterRedeem:", expectedCollateralRatioAfterRedeem);
@@ -398,7 +396,7 @@ contract SFEngineTest is Test, Constants {
 
         // Check balance
         uint256 amountCollateralToLiquidate = AggregatorV3Interface(
-            deployConfig.wethTokenAddress
+            deployConfig.wethPriceFeedAddress
         ).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
         uint256 amountCollateralLiquidatorReceived = amountCollateralToLiquidate + bonus;
@@ -461,7 +459,7 @@ contract SFEngineTest is Test, Constants {
 
         // Check balance
         uint256 amountCollateralToLiquidate = AggregatorV3Interface(
-            deployConfig.wethTokenAddress
+            deployConfig.wethPriceFeedAddress
         ).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
         uint256 bonusInSFToken =  AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(bonus);
@@ -476,7 +474,7 @@ contract SFEngineTest is Test, Constants {
     }
 
     function testCalculateStorageLocation() public pure {
-        bytes memory name = "stableflow.storage.SocialRecoveryPlugin";
+        bytes memory name = "stableflow.storage.FreezePlugin";
         bytes32 b = keccak256(abi.encode(uint256(keccak256(name)) - 1)) & ~bytes32(uint256(0xff));
         console2.logBytes32(b);
     }
