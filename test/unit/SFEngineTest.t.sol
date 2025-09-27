@@ -10,9 +10,13 @@ import {Constants} from "../../script/util/Constants.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
 import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
+import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
 import {IERC20} from "@openzeppelin/contracts/token/erc20/IERC20.sol";
 
 contract SFEngineTest is Test, Constants {
+
+    using Precisions for uint256;
+    using OracleLib for AggregatorV3Interface;
 
     uint256 private constant INITIAL_USER_BALANCE = 100 ether;
     uint256 private constant LIQUIDATOR_DEPOSIT_AMOUNT = 1000 ether;
@@ -40,7 +44,11 @@ contract SFEngineTest is Test, Constants {
         IERC20 collateralToken = IERC20(tokenAddress);
         vm.startPrank(user);
         collateralToken.approve(address(sfEngine), INITIAL_USER_BALANCE);
-        uint256 amountToMint = getAmountSFToMint(tokenAddress, DEFAULT_AMOUNT_COLLATERAL, collateralRatio);
+        uint256 amountToMint = sfEngine.calculateSFTokensByCollateral(
+            tokenAddress, 
+            DEFAULT_AMOUNT_COLLATERAL, 
+            collateralRatio
+        );
         sfToken.approve(address(sfEngine), amountToMint);
         sfEngine.depositCollateralAndMintSFToken(tokenAddress, DEFAULT_AMOUNT_COLLATERAL, amountToMint);
         vm.stopPrank();
@@ -59,43 +67,44 @@ contract SFEngineTest is Test, Constants {
 
     function testGetTokenUsdPrice() public view {
         assertEq(
-            sfEngine.getTokenUsdPrice(deployConfig.wethTokenAddress),
-            adjustNumberByPrecision(WETH_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION)
+             AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getPrice(),
+            WETH_USD_PRICE.convert()
         );
         assertEq(
-            sfEngine.getTokenUsdPrice(deployConfig.wbtcTokenAddress),
-            adjustNumberByPrecision(WBTC_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION)
+             AggregatorV3Interface(deployConfig.wbtcPriceFeedAddress).getPrice(),
+            WBTC_USD_PRICE.convert()
         );
     }
 
-    function testGetTokenValueInUsd() public view {
+    function testGetTokenValue() public view {
         uint256 amountToken = 2 ether;
         assertEq(
-            sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, amountToken),
-            (amountToken * adjustNumberByPrecision(WETH_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION)) / PRECISION_FACTOR
+             AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(amountToken),
+            (amountToken * WETH_USD_PRICE.convert()) / PRECISION_FACTOR
         );
         assertEq(
-            sfEngine.getTokenValueInUsd(deployConfig.wbtcTokenAddress, amountToken),
-            (amountToken * adjustNumberByPrecision(WBTC_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION)) / PRECISION_FACTOR
+             AggregatorV3Interface(deployConfig.wbtcPriceFeedAddress).getTokenValue(amountToken),
+            (amountToken * WBTC_USD_PRICE.convert()) / PRECISION_FACTOR
         );
     }
 
-    function testGetTokenAmountFromUsd() public view {
-        uint256 amountEth = sfEngine.getTokenAmountFromUsd(
-            deployConfig.wethTokenAddress, 2 * adjustNumberByPrecision(WETH_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION)
-        );
-        uint256 amountBtc = sfEngine.getTokenAmountFromUsd(
-            deployConfig.wbtcTokenAddress, 2 * adjustNumberByPrecision(WBTC_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION)
-        );
-        assertEq(amountEth, adjustNumberByPrecision(2, 0, PRECISION));
-        assertEq(amountBtc, adjustNumberByPrecision(2, 0, PRECISION));
+    function testGetTokenAmountsForUsd() public view {
+        uint256 amountEth = AggregatorV3Interface(
+            deployConfig.wethPriceFeedAddress
+        ).getTokensForValue(2 * WETH_USD_PRICE.convert());
+        uint256 amountBtc = AggregatorV3Interface(
+            deployConfig.wbtcTokenAddress
+        ).getTokensForValue(2 * WBTC_USD_PRICE.convert());
+        uint256 expectedTokenAmount = 2;
+        assertEq(amountEth, expectedTokenAmount.convert(PRECISION));
+        assertEq(amountBtc, expectedTokenAmount.convert(PRECISION));
     }
 
     function testGetSFTokenAmountByCollateral() public view {
         uint256 ethAmount = 2 ether;
         uint256 collateralRatio = 2 * PRECISION_FACTOR;
         uint256 sfAmount = sfEngine.calculateSFTokensByCollateral(deployConfig.wethTokenAddress, ethAmount, collateralRatio);
-        uint256 expectedEthInUsd = ethAmount * adjustNumberByPrecision(WETH_USD_PRICE, PRICE_FEED_DECIMALS, PRECISION) / PRECISION_FACTOR;
+        uint256 expectedEthInUsd = ethAmount * WETH_USD_PRICE.convert() / PRECISION_FACTOR;
         uint256 expectedSFAmount = expectedEthInUsd * sfEngine.getMinimumCollateralRatio() / PRECISION_FACTOR;
         assertEq(sfAmount, expectedSFAmount);
     }
@@ -135,7 +144,7 @@ contract SFEngineTest is Test, Constants {
     function test_RevertWhen_CollateralRatioIsBroken() public {
         // This assumes the collateral ratio is 1, eg. 100$ collateral => 100$ sf
         uint256 amountCollateral = 1 ether;
-        uint256 amountToMint = sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, amountCollateral);
+        uint256 amountToMint =  AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(amountCollateral);
         uint256 collateralRatio = 1 * PRECISION_FACTOR;
         IERC20 weth = IERC20(deployConfig.wethTokenAddress);
         vm.prank(address(deployer));
@@ -152,7 +161,9 @@ contract SFEngineTest is Test, Constants {
         // Arrange data
         IERC20 weth = IERC20(deployConfig.wethTokenAddress);
         uint256 amountCollateral = 2 ether;
-        uint256 collateralValueInUsd = sfEngine.getTokenValueInUsd(address(weth), amountCollateral);
+        uint256 collateralValueInUsd = AggregatorV3Interface(
+            address(deployConfig.wethPriceFeedAddress)
+        ).getTokenValue(amountCollateral);
         uint256 amountToMint = (collateralValueInUsd * PRECISION) / sfEngine.getMinimumCollateralRatio();
         vm.startPrank(user);
         weth.approve(address(sfEngine), amountCollateral);
@@ -188,8 +199,11 @@ contract SFEngineTest is Test, Constants {
     {
         vm.startPrank(user);
         uint256 amountDeposited = sfEngine.getCollateralAmount(user, deployConfig.wethTokenAddress);
-        uint256 amountToMint =
-            getAmountSFToMint(deployConfig.wethTokenAddress, DEFAULT_AMOUNT_COLLATERAL, DEFAULT_COLLATERAL_RATIO);
+        uint256 amountToMint = sfEngine.calculateSFTokensByCollateral(
+            deployConfig.wethTokenAddress, 
+            DEFAULT_AMOUNT_COLLATERAL, 
+            DEFAULT_COLLATERAL_RATIO
+        );
         vm.expectRevert(
             abi.encodeWithSelector(SFEngine.SFEngine__AmountToRedeemExceedsDeposited.selector, amountDeposited)
         );
@@ -224,8 +238,11 @@ contract SFEngineTest is Test, Constants {
             sfEngine.getCollateralAmount(user, deployConfig.wethTokenAddress) - amountCollateralToRedeem;
         console2.log("amountCollateralLeft:", amountCollateralLeft);
         // Maximum amount of sf the user can hold after collateral is redeemed
-        uint256 maximumAmountSFToHold =
-            getAmountSFToMint(deployConfig.wethTokenAddress, amountCollateralLeft, DEFAULT_COLLATERAL_RATIO);
+        uint256 maximumAmountSFToHold = sfEngine.calculateSFTokensByCollateral(
+            deployConfig.wethTokenAddress, 
+            amountCollateralLeft, 
+            DEFAULT_COLLATERAL_RATIO
+        );
         console2.log("maximumAmountSFToHold:", maximumAmountSFToHold);
         // The minimum amount of sf that it is supposed to burn to maintain the collateral ratio
         uint256 minimumAmountSFToBurn = sfEngine.getSFDebt(user) - maximumAmountSFToHold;
@@ -237,7 +254,7 @@ contract SFEngineTest is Test, Constants {
         uint256 amountSFLeft = sfEngine.getSFDebt(user) - amountSFToBurn;
         console2.log("amountSFLeft:", amountSFLeft);
         uint256 amountCollateralLeftInUsd =
-            sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, amountCollateralLeft);
+             AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(amountCollateralLeft);
         console2.log("amountCollateralLeftInUsd:", amountCollateralLeftInUsd);
         uint256 expectedCollateralRatioAfterRedeem = (amountCollateralLeftInUsd * PRECISION_FACTOR) / amountSFLeft;
         console2.log("expectedCollateralRatioAfterRedeem:", expectedCollateralRatioAfterRedeem);
@@ -269,8 +286,11 @@ contract SFEngineTest is Test, Constants {
             sfEngine.getCollateralAmount(user, deployConfig.wethTokenAddress) - amountCollateralToRedeem;
         console2.log("amountCollateralLeft:", amountCollateralLeft);
         // Maximum amount of sf the user can hold after collateral is redeemed
-        uint256 maximumAmountSFToHold =
-            getAmountSFToMint(deployConfig.wethTokenAddress, amountCollateralLeft, DEFAULT_COLLATERAL_RATIO);
+        uint256 maximumAmountSFToHold = sfEngine.calculateSFTokensByCollateral(
+            deployConfig.wethTokenAddress, 
+            amountCollateralLeft, 
+            DEFAULT_COLLATERAL_RATIO
+        );
         console2.log("maximumAmountSFToHold:", maximumAmountSFToHold);
         // The minimum amount of sf that it is supposed to burn to maintain the collateral ratio
         uint256 minimumAmountSFToBurn = sfEngine.getSFDebt(user) - maximumAmountSFToHold;
@@ -279,7 +299,7 @@ contract SFEngineTest is Test, Constants {
         uint256 amountSFLeft = sfEngine.getSFDebt(user) - minimumAmountSFToBurn;
         console2.log("amountSFLeft:", amountSFLeft);
         uint256 amountCollateralLeftInUsd =
-            sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, amountCollateralLeft);
+             AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(amountCollateralLeft);
         console2.log("amountCollateralLeftInUsd:", amountCollateralLeftInUsd);
         uint256 expectedCollateralRatioAfterRedeem = (amountCollateralLeftInUsd * PRECISION_FACTOR) / amountSFLeft;
         console2.log("expectedCollateralRatioAfterRedeem:", expectedCollateralRatioAfterRedeem);
@@ -377,7 +397,9 @@ contract SFEngineTest is Test, Constants {
         uint256 endingUserAmountMinted = sfEngine.getSFDebt(user);
 
         // Check balance
-        uint256 amountCollateralToLiquidate = sfEngine.getTokenAmountFromUsd(deployConfig.wethTokenAddress, debtToCover);
+        uint256 amountCollateralToLiquidate = AggregatorV3Interface(
+            deployConfig.wethTokenAddress
+        ).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
         uint256 amountCollateralLiquidatorReceived = amountCollateralToLiquidate + bonus;
         assertEq(endingLiquidatorWethBalance, startingLiquidatorWethBalance + amountCollateralLiquidatorReceived);
@@ -438,9 +460,11 @@ contract SFEngineTest is Test, Constants {
         uint256 endingUserAmountMinted = sfEngine.getSFDebt(user);
 
         // Check balance
-        uint256 amountCollateralToLiquidate = sfEngine.getTokenAmountFromUsd(deployConfig.wethTokenAddress, debtToCover);
+        uint256 amountCollateralToLiquidate = AggregatorV3Interface(
+            deployConfig.wethTokenAddress
+        ).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
-        uint256 bonusInSFToken = sfEngine.getTokenValueInUsd(deployConfig.wethTokenAddress, bonus);
+        uint256 bonusInSFToken =  AggregatorV3Interface(deployConfig.wethPriceFeedAddress).getTokenValue(bonus);
         assertEq(endingLiquidatorWethBalance, startingLiquidatorWethBalance + startingUserAmountDeposited);
         assertEq(endingLiquidatorSFBalance, startingLiquidatorSFBalance - debtToCover + bonusInSFToken);
         assertEq(endingEngineWethBalance, startingEngineWethBalance - startingUserAmountDeposited);
@@ -451,25 +475,31 @@ contract SFEngineTest is Test, Constants {
         assertEq(endingUserAmountMinted, 0);
     }
 
-    function getAmountSFToMint(address collateralTokenAddress, uint256 amountCollateral, uint256 collateralRatio)
-        private
-        view
-        returns (uint256)
-    {
-        uint256 tokenValueInUsd = sfEngine.getTokenValueInUsd(collateralTokenAddress, amountCollateral);
-        return (tokenValueInUsd * PRECISION_FACTOR) / collateralRatio;
-    }
-
-    function adjustNumberByPrecision(uint256 number, uint256 decimals, uint256 precision)
-        private
-        pure
-        returns (uint256)
-    {
-        return number * 10 ** (precision - decimals);
-    }
-
-    function testS() public {
-        bytes32 b = keccak256(abi.encode(uint256(keccak256("stableflow.storage.SocialRecoveryPlugin")) - 1)) & ~bytes32(uint256(0xff));
+    function testCalculateStorageLocation() public pure {
+        bytes memory name = "stableflow.storage.SocialRecoveryPlugin";
+        bytes32 b = keccak256(abi.encode(uint256(keccak256(name)) - 1)) & ~bytes32(uint256(0xff));
         console2.logBytes32(b);
+    }
+}
+
+library Precisions {
+
+    uint256 private constant PRICE_FEED_PRECISION = 8;
+    uint256 private constant DEFAULT_PRECISION = 18;
+
+    function convert(uint256 number) internal pure returns (uint256) {
+        return convert(number, PRICE_FEED_PRECISION, DEFAULT_PRECISION);
+    }
+
+    function convert(uint256 number, uint256 currentPrecision) internal pure returns (uint256) {
+        return convert(number, currentPrecision, DEFAULT_PRECISION);
+    }
+
+    function convert(
+        uint256 number, 
+        uint256 currentPrecision, 
+        uint256 targetPrecision
+    ) internal pure returns (uint256) {
+        return number * 10 ** (targetPrecision - currentPrecision);
     }
 }

@@ -3,7 +3,6 @@ pragma solidity ^0.8.30;
 
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
 import {SFToken} from "./SFToken.sol";
-import {Validator} from "./Validator.sol";
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IERC20} from "@openzeppelin/contracts/token/erc20/IERC20.sol";
@@ -31,11 +30,44 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
  * - Upgrade compatibility verification
  * - Owner-restricted critical functions
  */
-contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
+contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
 
     using ERC165Checker for address;
     using EnumerableSet for EnumerableSet.AddressSet;
     using OracleLib for AggregatorV3Interface;
+
+    /* -------------------------------------------------------------------------- */
+    /*                                   Errors                                   */
+    /* -------------------------------------------------------------------------- */
+
+    error SFEngine__InvalidUserAddress();
+    error SFEngine__InvalidCollateralAddress();
+    error SFEngine__AmountCollateralToDepositCanNotBeZero();
+    error SFEngine__AmountSFToBurnCanNotBeZero();
+    error SFEngine__DebtToCoverCanNotBeZero();
+    error SFEngine__TokenAddressAndPriceFeedLengthNotMatch();
+    error SFEngine__CollateralNotSupported();
+    error SFEngine__AmountToRedeemExceedsDeposited(uint256 amountDeposited);
+    error SFEngine__DebtToCoverExceedsCollateralDeposited(uint256 amountDeposited);
+    error SFEngine__TransferFailed();
+    error SFEngine__InsufficientBalance(uint256 balance);
+    error SFEngine__SFToBurnExceedsUserDebt(uint256 userDebt);
+    error SFEngine__CollateralRatioIsBroken(address user, uint256 collateralRatio);
+    error SFEngine__CollateralRatioIsNotBroken(address user, uint256 collateralRatio);
+    error SFEngine__IncompatibleImplementation();
+
+
+    /* -------------------------------------------------------------------------- */
+    /*                                   Events                                   */
+    /* -------------------------------------------------------------------------- */
+
+    event SFEngine__CollateralDeposited(
+        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
+    );
+    event SFEngine__CollateralRedeemed(
+        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
+    );
+    event SFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
 
     /* -------------------------------------------------------------------------- */
     /*                                  Constants                                 */
@@ -79,7 +111,7 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
 
     /// @dev Set of supported collateral token addresses
     /// @notice Uses EnumerableSet for efficient iteration and membership checks
-    EnumerableSet.AddressSet private supportedTokenAddressSet;
+    EnumerableSet.AddressSet private supportedCollaterals;
 
     /// @dev Nested mapping tracking user collateral balances
     /// @notice Format: user address => token address => amount
@@ -94,40 +126,11 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
     mapping(address user => uint256 sfDebt) private sfDebts;
 
     /* -------------------------------------------------------------------------- */
-    /*                                   Events                                   */
-    /* -------------------------------------------------------------------------- */
-
-    event SFEngine__CollateralDeposited(
-        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
-    );
-    event SFEngine__CollateralRedeemed(
-        address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
-    );
-    event SFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
-
-    /* -------------------------------------------------------------------------- */
-    /*                                   Errors                                   */
-    /* -------------------------------------------------------------------------- */
-
-    error SFEngine__TokenAddressAndPriceFeedLengthNotMatch();
-    error SFEngine__TokenNotSupported();
-    error SFEngine__AmountToRedeemExceedsDeposited(uint256 amountDeposited);
-    error SFEngine__DebtToCoverExceedsCollateralDeposited(uint256 amountDeposited);
-    error SFEngine__TransferFailed();
-    error SFEngine__InsufficientBalance(uint256 balance);
-    error SFEngine__SFToBurnExceedsUserDebt(uint256 userDebt);
-    error SFEngine__CollateralRatioIsBroken(address user, uint256 collateralRatio);
-    error SFEngine__CollateralRatioIsNotBroken(address user, uint256 collateralRatio);
-    error SFEngine__IncompatibleImplementation();
-
-    /* -------------------------------------------------------------------------- */
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
 
-    modifier onlySupportedToken(address tokenAddress) {
-        if (priceFeeds[tokenAddress] == address(0)) {
-            revert SFEngine__TokenNotSupported();
-        }
+    modifier requireSupportedCollateral(address collateral) {
+        _requireSupportedCollateral(collateral);
         _;
     }
 
@@ -150,45 +153,56 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
     /*                         External / Public Functions                        */
     /* -------------------------------------------------------------------------- */
 
+    /// @inheritdoc ISFEngine
     function depositCollateralAndMintSFToken(
         address collateralAddress,
         uint256 amountCollateral,
         uint256 amountSFToMint
-    )
-        external
-        override
-        notZeroAddress(collateralAddress)
-        notZeroValue(amountCollateral)
-        onlySupportedToken(collateralAddress)
-    {
+    ) external override requireSupportedCollateral(collateralAddress) {
+        if (collateralAddress == address(0)) {
+            revert SFEngine__InvalidCollateralAddress();
+        }
+        if (amountCollateral == 0) {
+            revert SFEngine__AmountCollateralToDepositCanNotBeZero();
+        }
         _depositCollateral(collateralAddress, amountCollateral);
         _mintSFToken(amountSFToMint);
     }
 
+    /// @inheritdoc ISFEngine
     function redeemCollateral(
         address collateralAddress,
         uint256 amountCollateralToRedeem,
         uint256 amountSFToBurn
-    )
-        public
-        override
-        notZeroAddress(collateralAddress)
-        notZeroValue(amountCollateralToRedeem)
-        onlySupportedToken(collateralAddress)
+    ) public override requireSupportedCollateral(collateralAddress)
     {
+        if (collateralAddress == address(0)) {
+            revert SFEngine__InvalidCollateralAddress();
+        }
+        if (amountSFToBurn == 0) {
+            revert SFEngine__AmountSFToBurnCanNotBeZero();
+        }
         _burnSFToken(msg.sender, msg.sender, amountSFToBurn, amountSFToBurn);
         _redeemCollateral(collateralAddress, amountCollateralToRedeem, msg.sender, msg.sender);
-        _revertIfCollateralRatioIsBroken(msg.sender);
+        _requireCollateralRatioIsNotBroken(msg.sender);
     }
 
-    function liquidate(address user, address collateralAddress, uint256 debtToCover)
-        external
-        override
-        notZeroAddress(collateralAddress)
-        notZeroValue(debtToCover)
-        onlySupportedToken(collateralAddress)
-    {
-        _revertIfCollateralRatioIsNotBroken(user);
+    /// @inheritdoc ISFEngine
+    function liquidate(
+        address user, 
+        address collateralAddress, 
+        uint256 debtToCover
+    ) external override requireSupportedCollateral(collateralAddress) {
+        if (user == address(0)) {
+            revert SFEngine__InvalidUserAddress();
+        }
+        if (collateralAddress == address(0)) {
+            revert SFEngine__InvalidCollateralAddress();
+        }
+        if (debtToCover == 0) {
+            revert SFEngine__DebtToCoverCanNotBeZero();
+        }
+        _requireCollateralRatioIsBroken(user);
         uint256 liquidatorBalance = sfToken.balanceOf(msg.sender);
         if (debtToCover > liquidatorBalance) {
             debtToCover = liquidatorBalance;
@@ -210,14 +224,16 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
         }
         _burnSFToken(msg.sender, user, amountSFToBurn, debtToCover);
         _redeemCollateral(collateralAddress, amountCollateralToLiquidate, user, msg.sender);
-        _revertIfCollateralRatioIsBroken(user);
-        _revertIfCollateralRatioIsBroken(msg.sender);
+        _requireCollateralRatioIsNotBroken(user);
+        _requireCollateralRatioIsNotBroken(msg.sender);
     }
 
+    /// @inheritdoc ISFEngine
     function getSFDebt(address user) external view override returns (uint256) {
         return sfDebts[user];
     }
 
+    /// @inheritdoc ISFEngine
     function calculateSFTokensByCollateral(
         address collateralAddress,
         uint256 amountCollateral,
@@ -227,35 +243,33 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
         return collateralInUsd * collateralRatio / PRECISION_FACTOR;
     }
 
+    /// @inheritdoc ISFEngine
     function getTotalCollateralValueInUsd(address user) public view override returns (uint256) {
-        uint256 totalCollateralValueInUsd;
-        for (uint256 i = 0; i < supportedTokenAddressSet.length(); i++) {
-            address tokenAddress = supportedTokenAddressSet.at(i);
-            uint256 amountCollateral = collaterals[user][tokenAddress];
-            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
-        }
-        return totalCollateralValueInUsd;
+        return _getTotalCollateralValueInUsd(user);
     }
 
+    /// @inheritdoc ISFEngine
     function getCollateralRatio(address user) public view override returns (uint256) {
-        uint256 sfDebt = sfDebts[user];
-        if (sfDebt == 0) {
-            return type(uint256).max;
-        }
-        uint256 totalCollateralValueInUsd;
-        for (uint256 i = 0; i < supportedTokenAddressSet.length(); i++) {
-            address tokenAddress = supportedTokenAddressSet.at(i);
-            uint256 amountCollateral = collaterals[user][tokenAddress];
-            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
-        }
-        return totalCollateralValueInUsd * PRECISION_FACTOR / sfDebt;
+        return _getCollateralRatio(user);
     }
 
-    function getMinimumCollateralRatio() public pure override returns (uint256) {
+    /// @inheritdoc ISFEngine
+    function getCollateralAmount(address user, address collateralAddress) external view override returns (uint256) {
+        return collaterals[user][collateralAddress];
+    }
+
+    /// @inheritdoc ISFEngine
+    function getSupportedCollaterals() external override view returns (address[] memory) {
+        return supportedCollaterals.values();
+    }
+
+    /// @inheritdoc ISFEngine
+    function getMinimumCollateralRatio() external pure override returns (uint256) {
         return MINIMUM_COLLATERAL_RATIO;
     }
 
-    function getSFTokenAddress() public view override returns (address) {
+    /// @inheritdoc ISFEngine
+    function getSFTokenAddress() external view override returns (address) {
         return address(sfToken);
     }
 
@@ -268,12 +282,19 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
     /*                              Private Functions                             */
     /* -------------------------------------------------------------------------- */
 
+    /// @inheritdoc UUPSUpgradeable
+    function _authorizeUpgrade(address newImplementation) internal view override onlyOwner {
+        if (!newImplementation.supportsInterface(type(ISFEngine).interfaceId)) {
+            revert SFEngine__IncompatibleImplementation();
+        }
+    }
+
     function _initializePriceFeeds(address[] memory tokenAddresses, address[] memory priceFeedAddresses) private {
         if (tokenAddresses.length != priceFeedAddresses.length) {
             revert SFEngine__TokenAddressAndPriceFeedLengthNotMatch();
         }
         for (uint256 i = 0; i < tokenAddresses.length; i++) {
-            supportedTokenAddressSet.add(tokenAddresses[i]);
+            supportedCollaterals.add(tokenAddresses[i]);
             priceFeeds[tokenAddresses[i]] = priceFeedAddresses[i];
         }
     }
@@ -292,43 +313,35 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
             return;
         }
         sfDebts[msg.sender] += amount;
-        _revertIfCollateralRatioIsBroken(msg.sender);
+        _requireCollateralRatioIsNotBroken(msg.sender);
         emit SFEngine__SFTokenMinted(msg.sender, amount);
         sfToken.mint(msg.sender, amount);
     }
 
-    function _getTokenValueInUsd(address tokenAddress, uint256 amountToken)
-        private
-        view
-        onlySupportedToken(tokenAddress)
-        returns (uint256)
-    {
-        return amountToken * _getTokenUsdPrice(tokenAddress) / PRECISION_FACTOR;
+    function _getTokenValueInUsd(
+        address tokenAddress, 
+        uint256 amountToken
+    ) private view requireSupportedCollateral(tokenAddress) returns (uint256) {
+        return AggregatorV3Interface(priceFeeds[tokenAddress]).getTokenValue(amountToken);
     }
 
-    function _getTokenAmountFromUsd(address tokenAddress, uint256 amountUsd)
-        private
-        view
-        onlySupportedToken(tokenAddress)
-        returns (uint256)
-    {
-        return (amountUsd * PRECISION_FACTOR) / _getTokenUsdPrice(tokenAddress);
+    function _getTokenAmountFromUsd(
+        address tokenAddress, 
+        uint256 amountUsd
+    ) private view requireSupportedCollateral(tokenAddress) returns (uint256) {
+        return AggregatorV3Interface(priceFeeds[tokenAddress]).getTokensForValue(amountUsd);
     }
 
-    function _getTokenUsdPrice(address tokenAddress) private view onlySupportedToken(tokenAddress) returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(priceFeeds[tokenAddress]);
-        // Normally 8 decimals
-        (, int256 answer,,,) = priceFeed.getStaleCheckedLatestRoundData();
-        // token / usd price，18 decimals
-        return uint256(answer) * 10 ** (PRECISION - priceFeed.decimals());
+    function _getTokenUsdPrice(address tokenAddress) private view requireSupportedCollateral(tokenAddress) returns (uint256) {
+        return AggregatorV3Interface(priceFeeds[tokenAddress]).getPrice();
     }
 
-    function _burnSFToken(address from, address onBehalfOf, uint256 amountToBurn, uint256 debtToCover)
-        private
-        notZeroAddress(from)
-        notZeroValue(amountToBurn)
-        notZeroValue(debtToCover)
-    {
+    function _burnSFToken(
+        address from, 
+        address onBehalfOf, 
+        uint256 amountToBurn, 
+        uint256 debtToCover
+    ) private {
         uint256 balance = sfToken.balanceOf(from);
         if (balance < amountToBurn) {
             revert SFEngine__InsufficientBalance(balance);
@@ -351,6 +364,9 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
         address collateralFrom,
         address collateralTo
     ) private {
+        if (amountCollateralToRedeem == 0) {
+            return;
+        }
         uint256 collateralDeposited = collaterals[collateralFrom][collateralAddress];
         if (collateralDeposited < amountCollateralToRedeem) {
             revert SFEngine__AmountToRedeemExceedsDeposited(collateralDeposited);
@@ -363,61 +379,53 @@ contract SFEngine is ISFEngine, Validator, UUPSUpgradeable, OwnableUpgradeable, 
         }
     }
 
-    function _revertIfCollateralRatioIsBroken(address user) private view {
+    function _getTotalCollateralValueInUsd(address user) private view returns (uint256) {
+        uint256 totalCollateralValueInUsd;
+        for (uint256 i = 0; i < supportedCollaterals.length(); i++) {
+            address tokenAddress = supportedCollaterals.at(i);
+            uint256 amountCollateral = collaterals[user][tokenAddress];
+            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
+        }
+        return totalCollateralValueInUsd;
+    }
+
+    function _checkCollateralRatio(address user) public view returns (bool isBroken, uint256 collateralRatio) {
+        collateralRatio = _getCollateralRatio(user);
+        isBroken = collateralRatio < MINIMUM_COLLATERAL_RATIO;
+        return (isBroken, collateralRatio);
+    }
+    
+    function _getCollateralRatio(address user) private view returns (uint256) {
+        uint256 sfDebt = sfDebts[user];
+        if (sfDebt == 0) {
+            return type(uint256).max;
+        }
+        uint256 totalCollateralValueInUsd;
+        for (uint256 i = 0; i < supportedCollaterals.length(); i++) {
+            address tokenAddress = supportedCollaterals.at(i);
+            uint256 amountCollateral = collaterals[user][tokenAddress];
+            totalCollateralValueInUsd += _getTokenValueInUsd(tokenAddress, amountCollateral);
+        }
+        return totalCollateralValueInUsd * PRECISION_FACTOR / sfDebt;
+    }
+
+    function _requireSupportedCollateral(address collateral) private view {
+        if (priceFeeds[collateral] == address(0)) {
+            revert SFEngine__CollateralNotSupported();
+        }
+    }
+
+    function _requireCollateralRatioIsNotBroken(address user) private view {
         (bool isBroken, uint256 collateralRatio) = _checkCollateralRatio(user);
         if (isBroken) {
             revert SFEngine__CollateralRatioIsBroken(user, collateralRatio);
         }
     }
 
-    function _revertIfCollateralRatioIsNotBroken(address user) private view {
+    function _requireCollateralRatioIsBroken(address user) private view {
         (bool isBroken, uint256 collateralRatio) = _checkCollateralRatio(user);
         if (!isBroken) {
             revert SFEngine__CollateralRatioIsNotBroken(user, collateralRatio);
         }
-    }
-
-    function _checkCollateralRatio(address user) public view returns (bool isBroken, uint256 collateralRatio) {
-        collateralRatio = getCollateralRatio(user);
-        isBroken = collateralRatio < MINIMUM_COLLATERAL_RATIO;
-        return (isBroken, collateralRatio);
-    }
-
-    /* -------------------------------------------------------------------------- */
-    /*                        Overridden Internal Functions                       */
-    /* -------------------------------------------------------------------------- */
-    
-    function _authorizeUpgrade(address newImplementation) internal view override onlyOwner {
-        if (!newImplementation.supportsInterface(type(ISFEngine).interfaceId)) {
-            revert SFEngine__IncompatibleImplementation();
-        }
-    }
-
-    /* -------------------------------------------------------------------------- */
-    /*                           Getter / View Functions                          */
-    /* -------------------------------------------------------------------------- */
-
-    function getCollateralAmount(address user, address collateralAddress) public view returns (uint256) {
-        return collaterals[user][collateralAddress];
-    }
-
-    function getCollateralTokenAddresses() public view returns (address[] memory) {
-        return supportedTokenAddressSet.values();
-    }
-
-    function getTokenUsdPrice(address tokenAddress) external view returns (uint256) {
-        return _getTokenUsdPrice(tokenAddress);
-    }
-
-    function getTokenValueInUsd(address tokenAddress, uint256 amountToken) external view returns (uint256) {
-        return _getTokenValueInUsd(tokenAddress, amountToken);
-    }
-
-    function getTokenAmountFromUsd(address tokenAddress, uint256 amountUsd)
-        external
-        view
-        returns (uint256 tokenValue)
-    {
-        return _getTokenAmountFromUsd(tokenAddress, amountUsd);
     }
 }

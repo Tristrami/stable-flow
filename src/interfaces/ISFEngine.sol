@@ -90,6 +90,27 @@ interface ISFEngine {
     function getCollateralRatio(address user) external view returns (uint256);
 
     /**
+     * @dev Retrieves the collateral amount deposited by a specific user for a given collateral token
+     * @param user Address of the user to query
+     * @param collateralAddress Address of the collateral token contract
+     * @return uint256 Amount of collateral deposited by the user (in token's native decimals)
+     * @notice Returns 0 if:
+     * - User has no deposited collateral
+     * - Token is not supported as collateral
+     */
+    function getCollateralAmount(address user, address collateralAddress) external view returns (uint256);
+
+    /**
+     * @dev Gets the list of all supported collateral addresses
+     * @return address[] memory Array of supported collateral contract addresses
+     * @notice Returned array includes:
+     * - Currently active collateral
+     * - Tokens that may have zero total deposits
+     * @notice The order of addresses in the array is not guaranteed
+     */
+    function getSupportedCollaterals() external view returns (address[] memory);
+
+    /**
      * @dev Get system minimum collateral ratio
      * @return uint256 Minimum collateral ratio required by the system
      */
