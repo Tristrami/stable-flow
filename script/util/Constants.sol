@@ -9,6 +9,7 @@ contract Constants {
     uint256 internal constant ETH_MAIN_NET_CHAIN_ID = 1;
     uint256 internal constant ETH_SEPOLIA_CHAIN_ID = 11155111;
     uint256 internal constant ANVIL_CHAIN_ID = 31337;
+    uint256 internal constant ANVIL_SEPOLIA_CHAIN_ID = 31338;
 
     /* -------------------------------------------------------------------------- */
     /*                                Deploy Config                               */

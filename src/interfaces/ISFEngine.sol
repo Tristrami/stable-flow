@@ -4,15 +4,24 @@ pragma solidity ^0.8.30;
 interface ISFEngine {
     
     /**
-     * @dev Deposit collateral and mint SF tokens in a single transaction
-     * @param collateralAddress Address of the collateral token to deposit
-     * @param amountCollateral Amount of collateral to deposit
-     * @param amountSFToMint Amount of SF tokens to mint
-     * @notice Requirements:
-     * - Collateral address must not be zero (notZeroAddress)
-     * - Collateral amount must not be zero (notZeroValue)
-     * - Token must be supported (onlySupportedToken)
-     * @notice Calls internal _depositCollateral and _mintSFToken functions
+     * @notice Deposits collateral and mints SF Tokens in a single transaction
+     * @dev Combines collateral deposit, token minting, and automated yield farming
+     * @param collateralAddress Address of the collateral token (must be whitelisted)
+     * @param amountCollateral Amount of collateral to deposit (in token decimals)
+     * @param amountSFToMint Amount of SF Tokens to mint (18 decimals)
+     * @custom:requires Supported collateral (enforced by requireSupportedCollateral modifier)
+     * @custom:effects 
+     *   - Transfers collateral from user to protocol
+     *   - Mints SF Tokens to user
+     *   - Automatically invests portion to Aave (based on investmentRatio)
+     * @custom:reverts 
+     *   - With SFEngine__InvalidCollateralAddress if collateralAddress is zero
+     *   - With SFEngine__AmountCollateralToDepositCanNotBeZero for zero deposits
+     *   - With AaveInvestmentIntegration__InsufficientBalance if investment fails
+     * @custom:security 
+     *   - Reentrancy guarded
+     *   - Collateral support verified
+     *   - Investment ratio capped
      */
     function depositCollateralAndMintSFToken(
         address collateralAddress,
@@ -51,6 +60,68 @@ interface ISFEngine {
      * @notice Ensures both parties maintain proper collateral ratio after liquidation
      */
     function liquidate(address user, address collateralAddress, uint256 debtToCover) external;
+
+    /**
+     * @notice Updates the investment ratio (percentage of collateral assets allocated to investments)
+     * @dev Restricted to authorized roles, modifies core protocol parameters
+     * @param newInvestmentRatio New investment ratio in basis points (e.g., 5000 = 50%)
+     * @custom:access Only addresses with CONFIGURATOR_ROLE
+     * @custom:effect Updates `investmentRatio` state variable and may trigger rebalancing
+     * @custom:security Reverts if ratio exceeds safety limits (MIN/MAX_INVESTMENT_RATIO)
+     */
+    function updateInvestmentRatio(uint256 newInvestmentRatio) external;
+
+    /**
+     * @notice Harvests investment gains from a specific asset
+     * @dev Withdraws specified yield amount from external protocols (e.g., Aave)
+     * @param asset Address of the yield-bearing asset (e.g., USDC, DAI)
+     * @param amount Amount to harvest (in asset's native decimals)
+     * @custom:access Only contract owner
+     * @custom:effect Increases protocol treasury balance, updates `investmentGains` mapping
+     * @custom:reverts If asset is unsupported or insufficient yield available
+     */
+    function harvest(address asset, uint256 amount) external;
+
+    /**
+     * @notice Harvests all available yields from all invested assets
+     * @dev Iterates through all supported assets for batch processing
+     * @custom:access Only contract owner
+     * @custom:effect Updates all entries in `investmentGains` mapping
+     * @custom:warning High gas consumption (scales with number of assets)
+     * @custom:recommendation Execute during low network congestion
+     */
+    function harvestAll() external;
+
+    /**
+     * @notice Queries accumulated investment gains for a specific asset
+     * @param asset Address of the asset to query
+     * @return uint256 Total unclaimed yield (in asset's native decimals)
+     * @dev Data sourced from internal `investmentGains` mapping
+     * @custom:warning Returned value may fluctuate with market conditions
+     */
+    function getInvestmentGain(address asset) external view returns (uint256);
+
+    /**
+     * @notice Calculates total unrealized gains across all assets in USD value
+     * @return uint256 Aggregate yield value (18 decimal precision)
+     * @dev Uses Chainlink oracles for real-time price feeds
+     * @custom:warning Extremely gas-intensive (multiple oracle calls + iteration)
+     * @custom:reverts If any asset's oracle is unavailable
+     * @custom:recommendation Use off-chain view function for frequent queries
+     */
+    function getAllInvestmentGainInUsd() external view returns (uint256);
+
+    /**
+     * @notice Returns the current investment ratio used by the protocol
+     * @dev The investment ratio determines what percentage of deposited collateral is allocated to yield-generating protocols (e.g., Aave)
+     * @dev Ratio is expressed in basis points (1e18 = 100%)
+     * @return uint256 Current investment ratio with 18 decimal precision
+     * @custom:examples
+     * - 0.5e18 → 50% of collateral invested
+     * - 0.3e18 → 30% of collateral invested
+     * @custom:security This is a view function that does not modify state
+     */
+    function getInvestmentRatio() external view returns (uint256);
 
     /**
      * @dev Get the SF token debt amount for a user
@@ -120,5 +191,5 @@ interface ISFEngine {
      * @dev Get SF token contract address
      * @return address Address of the SF token contract
      */
-    function getSFTokenAddress() external returns (address);
+    function getSFTokenAddress() external view returns (address);
 }

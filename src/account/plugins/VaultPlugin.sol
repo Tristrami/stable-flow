@@ -78,8 +78,8 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     );
     event VaultPlugin__Harvest(
         address indexed collateralAddress, 
-        uint256 indexed amountCollateral, 
-        uint256 indexed sfToBurn
+        uint256 indexed amountCollateralToRedeem, 
+        uint256 indexed debtToRepay
     );
     event VaultPlugin__Liquidate(
         address indexed account, 
@@ -215,7 +215,8 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     /// @inheritdoc IVaultPlugin
     function harvest(
         address collateralAddress,
-        uint256 amountCollateralToRedeem
+        uint256 amountCollateralToRedeem,
+        uint256 debtToRepay
     ) 
         external 
         override 
@@ -224,17 +225,12 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         requireSupportedCollateral(collateralAddress)
     {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        uint256 amountSFToBurn = $.sfEngine.calculateSFTokensByCollateral(
-            collateralAddress, 
-            amountCollateralToRedeem,
-            $.customVaultConfig.collateralRatio
-        );
         uint256 sfBalance = this.balance();
-        if (amountSFToBurn > sfBalance) {
-            revert VaultPlugin__InsufficientBalance(address(0), sfBalance, amountSFToBurn);
+        if (debtToRepay > sfBalance) {
+            revert VaultPlugin__InsufficientBalance(address(0), sfBalance, debtToRepay);
         }
-        emit VaultPlugin__Harvest(collateralAddress, amountCollateralToRedeem, amountSFToBurn);
-        $.sfEngine.redeemCollateral(collateralAddress, amountCollateralToRedeem, amountSFToBurn);
+        emit VaultPlugin__Harvest(collateralAddress, amountCollateralToRedeem, debtToRepay);
+        $.sfEngine.redeemCollateral(collateralAddress, amountCollateralToRedeem, debtToRepay);
     }
 
     /// @inheritdoc IVaultPlugin
@@ -253,7 +249,7 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 sfBalance = this.balance();
         if (debtToCover > sfBalance) {
-            revert VaultPlugin__InsufficientBalance(address(0), sfBalance, debtToCover);
+            revert VaultPlugin__InsufficientBalance(address($.sfEngine), sfBalance, debtToCover);
         }
         emit VaultPlugin__Liquidate(account, collateralAddress, debtToCover);
         IERC20($.sfTokenAddress).approve(address($.sfEngine), debtToCover);
@@ -462,9 +458,9 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         uint256 collateralToTopUpInUsd = requiredCollateralInUsd - currentCollateralInUsd;
         address[] memory collaterals = $.depositedCollaterals.values();
         for (uint256 i = 0; i < collaterals.length && collateralToTopUpInUsd > 0; i++) {
-            address priceFeed = $.supportedCollaterals.get(collaterals[i]);
+            (bool collateralSupported, address priceFeed) = $.supportedCollaterals.tryGet(collaterals[i]);
             uint256 collateralBalance = _getCollateralBalance(collaterals[i]);
-            if (priceFeed == address(0) || collateralBalance == 0) {
+            if (collateralSupported || collateralBalance == 0) {
                 continue;
             }
             uint256 collateralBalanceInUsd = AggregatorV3Interface(priceFeed).getTokenValue(collateralBalance);

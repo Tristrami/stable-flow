@@ -1,4 +1,13 @@
 {
+  "lib/aave-address-book": {
+    "rev": "6108fa2664be9e39d976cf58900c8591057437fb"
+  },
+  "lib/aave-v3-core": {
+    "tag": {
+      "name": "v1.19.4",
+      "rev": "b74526a7bc67a3a117a1963fc871b3eb8cea8435"
+    }
+  },
   "lib/account-abstraction": {
     "tag": {
       "name": "v0.8.0",

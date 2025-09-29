@@ -3,13 +3,16 @@ pragma solidity ^0.8.30;
 
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
 import {SFToken} from "./SFToken.sol";
+import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
+import {AaveInvestmentIntegration} from "./integrations/AaveInvestmentIntegration.sol";
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IERC20} from "@openzeppelin/contracts/token/erc20/IERC20.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
+import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
 
 /**
  * @title SFEngine
@@ -30,11 +33,13 @@ import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Own
  * - Upgrade compatibility verification
  * - Owner-restricted critical functions
  */
-contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
+contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
 
     using ERC165Checker for address;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableMap for EnumerableMap.AddressToUintMap;
     using OracleLib for AggregatorV3Interface;
+    using AaveInvestmentIntegration for AaveInvestmentIntegration.Investment;
 
     /* -------------------------------------------------------------------------- */
     /*                                   Errors                                   */
@@ -56,7 +61,6 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
     error SFEngine__CollateralRatioIsNotBroken(address user, uint256 collateralRatio);
     error SFEngine__IncompatibleImplementation();
 
-
     /* -------------------------------------------------------------------------- */
     /*                                   Events                                   */
     /* -------------------------------------------------------------------------- */
@@ -68,6 +72,8 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
     event SFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
+    event SFEngine__UpdateInvestmentRatio(uint256 investmentRatio);
+    event SFEngine__Harvest(address indexed asset, uint256 indexed amount, uint256 indexed interest);
 
     /* -------------------------------------------------------------------------- */
     /*                                  Constants                                 */
@@ -105,6 +111,44 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
     /*                              State Variables                               */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @notice Current percentage of collateral allocated to Aave for yield generation
+     * @dev Represented in basis points (1e18 = 100%)
+     * @dev Example values:
+     *   - 0.3e18 = 30% of collateral invested
+     *   - 0.5e18 = 50% of collateral invested
+     */
+    uint256 private investmentRatio;
+
+    /**
+     * @notice Time interval between automatic yield harvests (in seconds)
+     * @dev Used by Chainlink Automation to trigger harvestAll()
+    */
+    uint256 private autoHarvestDuration;
+
+    /**
+     * @notice Timestamp of last automated yield harvest
+     * @dev Used with autoHarvestDuration to determine next harvest eligibility
+     * @dev Reset to block.timestamp on:
+     *   - Manual harvests
+     *   - Successful auto-harvests
+     *   - Investment ratio changes
+     */
+    uint256 private lastAutoHarvestTime;
+
+    /**
+     * @notice Liquidation bonus rate for incentivizing liquidators
+     * @dev Determines the additional collateral percentage awarded to liquidators
+     * @dev Calculation: `bonusAmount = collateralToLiquidate * bonusRate / PRECISION_FACTOR`
+     */
+    uint256 private bonusRate;
+
+    /**
+     * @notice Tracks harvested yields per asset
+     * @dev Mapping format: assetAddress => accumulatedYieldAmount
+     */
+    EnumerableMap.AddressToUintMap private investmentGains;
+
     /// @dev Instance of the SF token contract
     /// @notice Handles all SF token minting/burning operations
     SFToken private sfToken;
@@ -125,6 +169,15 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
     /// @notice Represents outstanding minted SF tokens that must be collateralized
     mapping(address user => uint256 sfDebt) private sfDebts;
 
+    /**
+     * @notice Aave protocol integration state container
+     * @dev Contains:
+     *   - poolAddress: Current Aave Pool contract (upgradeable)
+     *   - investedAssets: EnumerableMap of active investments (asset => amount)
+     *   - sfEngineAddress: Parent contract reference for access control
+     */
+    AaveInvestmentIntegration.Investment private aaveInvestment;
+
     /* -------------------------------------------------------------------------- */
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
@@ -139,14 +192,38 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
     /* -------------------------------------------------------------------------- */
 
     function initialize(
-        address sfTokenAddress, 
-        address[] memory tokenAddresses, 
-        address[] memory priceFeedAddresses
+        address _sfTokenAddress, 
+        address _aavePoolAddress,
+        uint256 _investmentRatio,
+        uint256 _autoHarvestDuration,
+        uint256 _bonusRate,
+        address[] memory _tokenAddresses, 
+        address[] memory _priceFeedAddresses
     ) external initializer {
         __UUPSUpgradeable_init();
         __Ownable_init(msg.sender);
-        _initializePriceFeeds(tokenAddresses, priceFeedAddresses);
-        sfToken = SFToken(sfTokenAddress);
+        _updateSupportedCollaterals(_tokenAddresses, _priceFeedAddresses);
+        sfToken = SFToken(_sfTokenAddress);
+        investmentRatio = _investmentRatio;
+        autoHarvestDuration = _autoHarvestDuration;
+        bonusRate = _bonusRate;
+        lastAutoHarvestTime = block.timestamp;
+        aaveInvestment.poolAddress = _aavePoolAddress;
+        aaveInvestment.sfEngineAddress = address(this);
+    }
+
+    function reinitialize(
+        uint64 _version,
+        uint256 _investmentRatio,
+        uint256 _autoHarvestDuration,
+        uint256 _bonusRate,
+        address[] memory _tokenAddresses, 
+        address[] memory _priceFeedAddresses
+    ) external reinitializer(_version) {
+        investmentRatio = _investmentRatio;
+        autoHarvestDuration = _autoHarvestDuration;
+        bonusRate = _bonusRate;
+        _updateSupportedCollaterals(_tokenAddresses, _priceFeedAddresses);
     }
 
     /* -------------------------------------------------------------------------- */
@@ -167,6 +244,8 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         }
         _depositCollateral(collateralAddress, amountCollateral);
         _mintSFToken(amountSFToMint);
+        uint256 amountToInvest = amountCollateral * investmentRatio / PRECISION_FACTOR;
+        aaveInvestment.invest(collateralAddress, amountToInvest);
     }
 
     /// @inheritdoc ISFEngine
@@ -174,8 +253,7 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         address collateralAddress,
         uint256 amountCollateralToRedeem,
         uint256 amountSFToBurn
-    ) public override requireSupportedCollateral(collateralAddress)
-    {
+    ) public override requireSupportedCollateral(collateralAddress) {
         if (collateralAddress == address(0)) {
             revert SFEngine__InvalidCollateralAddress();
         }
@@ -213,7 +291,7 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
             amountCollateralToLiquidate = amountDeposited;
         }
         uint256 amountSFToBurn = debtToCover;
-        uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
+        uint256 bonus = amountCollateralToLiquidate * bonusRate / PRECISION_FACTOR;
         uint256 maxAmountToLiquidate = amountCollateralToLiquidate + bonus;
         if (maxAmountToLiquidate > amountDeposited) {
             amountCollateralToLiquidate = amountDeposited;
@@ -226,6 +304,42 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         _redeemCollateral(collateralAddress, amountCollateralToLiquidate, user, msg.sender);
         _requireCollateralRatioIsNotBroken(user);
         _requireCollateralRatioIsNotBroken(msg.sender);
+    }
+
+    /// @inheritdoc ISFEngine
+    function updateInvestmentRatio(uint256 newInvestmentRatio) external override onlyOwner {
+        _updateInvestmentRatio(newInvestmentRatio);
+    }
+
+    /// @inheritdoc ISFEngine
+    function harvest(address asset, uint256 amount) external onlyOwner {
+        _harvest(asset, amount);
+    }
+
+    /// @inheritdoc ISFEngine
+    function harvestAll() external onlyOwner {
+        _harvestAll();
+    }
+
+    /// @inheritdoc ISFEngine
+    function getInvestmentGain(address asset) external view override returns (uint256) {
+        (, uint256 amount) = investmentGains.tryGet(asset);
+        return amount;
+    }
+
+    /// @inheritdoc ISFEngine
+    function getAllInvestmentGainInUsd() external view override returns (uint256) {
+        uint256 totalValueInUsd;
+        for (uint256 i = 0; i < investmentGains.length(); i++) {
+            (address asset, uint256 gain) = investmentGains.at(i);
+            totalValueInUsd += AggregatorV3Interface(asset).getTokenValue(gain);
+        }
+        return totalValueInUsd;
+    }
+
+    /// @inheritdoc ISFEngine
+    function getInvestmentRatio() external view override returns (uint256) {
+        return investmentRatio;
     }
 
     /// @inheritdoc ISFEngine
@@ -273,6 +387,22 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         return address(sfToken);
     }
 
+    /// @inheritdoc AutomationCompatibleInterface
+    function checkUpkeep(bytes calldata /* checkData */) external view override returns (
+        bool upkeepNeeded, 
+        bytes memory performData
+    ) {
+        upkeepNeeded = _shouldAutoHarvest();
+        performData = "";
+    }
+
+    /// @inheritdoc AutomationCompatibleInterface
+    function performUpkeep(bytes calldata /* performData */) external override {
+        if (_shouldAutoHarvest()) {
+            _harvestAll();
+        }
+    }
+
     /// @inheritdoc ERC165
     function supportsInterface(bytes4 interfaceId) public view override returns (bool) {
         return interfaceId == type(ISFEngine).interfaceId || super.supportsInterface(interfaceId);
@@ -289,7 +419,10 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         }
     }
 
-    function _initializePriceFeeds(address[] memory tokenAddresses, address[] memory priceFeedAddresses) private {
+    function _updateSupportedCollaterals(
+        address[] memory tokenAddresses, 
+        address[] memory priceFeedAddresses
+    ) private {
         if (tokenAddresses.length != priceFeedAddresses.length) {
             revert SFEngine__TokenAddressAndPriceFeedLengthNotMatch();
         }
@@ -371,12 +504,22 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
         if (collateralDeposited < amountCollateralToRedeem) {
             revert SFEngine__AmountToRedeemExceedsDeposited(collateralDeposited);
         }
+        uint256 collateralBalance = IERC20(collateralAddress).balanceOf(address(this));
+        if (collateralBalance < amountCollateralToRedeem) {
+            uint256 amountToWithdrawFromAave = amountCollateralToRedeem - collateralBalance;
+            aaveInvestment.withdraw(collateralAddress, amountToWithdrawFromAave);
+        }
         collaterals[collateralFrom][collateralAddress] -= amountCollateralToRedeem;
         emit SFEngine__CollateralRedeemed(collateralFrom, collateralAddress, amountCollateralToRedeem);
         bool success = IERC20(collateralAddress).transfer(collateralTo, amountCollateralToRedeem);
         if (!success) {
             revert SFEngine__TransferFailed();
         }
+    }
+
+    function _updateInvestmentRatio(uint256 newInvestmentRatio) private {
+        investmentRatio = newInvestmentRatio;
+        emit SFEngine__UpdateInvestmentRatio(newInvestmentRatio);
     }
 
     function _getTotalCollateralValueInUsd(address user) private view returns (uint256) {
@@ -407,6 +550,26 @@ contract SFEngine is ISFEngine, UUPSUpgradeable, OwnableUpgradeable, ERC165 {
             totalCollateralValueInUsd += _getTokenValueInUsd(collateralAddress, amountCollateral);
         }
         return totalCollateralValueInUsd * PRECISION_FACTOR / sfDebt;
+    }
+
+    function _shouldAutoHarvest() private view returns (bool) {
+        bool hasInvestedAsset = aaveInvestment.investedAssets.length() > 0;
+        return hasInvestedAsset && block.timestamp - lastAutoHarvestTime >= autoHarvestDuration;
+    }
+
+    function _harvest(address asset, uint256 amount) private {
+        (uint256 amountWithdrawn, uint256 interest) = aaveInvestment.withdraw(asset, amount);
+        (, uint256 investmentGain) = investmentGains.tryGet(asset);
+        investmentGains.set(asset, investmentGain + interest);
+        emit SFEngine__Harvest(asset, amountWithdrawn, interest);
+    }
+
+    function _harvestAll() private {
+        EnumerableMap.AddressToUintMap storage investedAssets = aaveInvestment.investedAssets;
+        for (uint256 i = 0; i < investedAssets.length(); i++) {
+            (address asset, ) = investedAssets.at(i);
+            _harvest(asset, type(uint256).max);
+        }
     }
 
     function _requireSupportedCollateral(address collateral) private view {

@@ -67,7 +67,8 @@ interface IVaultPlugin {
      */
     function harvest(
         address collateralAddress,
-        uint256 amountCollateralToRedeem
+        uint256 amountCollateralToRedeem,
+        uint256 debtToRepay
     ) external;
 
     /**

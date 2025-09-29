@@ -4,6 +4,18 @@ pragma solidity ^0.8.30;
 import {IFreezePlugin} from "../../interfaces/IFreezePlugin.sol";
 import {BaseSFAccountPlugin} from "./BaseSFAccountPlugin.sol";
 
+/**
+ * @title FreezePlugin
+ * @notice Provides account freezing/unfreezing functionality for StableFlow protocol
+ * @dev Key features:
+ * - Emergency account freezing via EntryPoint
+ * - Complete freeze history tracking
+ * - State-machine based freeze management
+ * @dev Security features:
+ * - Only EntryPoint can trigger freeze/unfreeze
+ * - Immutable freeze records for auditing
+ * - Storage isolation via diamond pattern
+ */
 abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
 
     /* -------------------------------------------------------------------------- */
