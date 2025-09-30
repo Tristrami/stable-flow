@@ -332,7 +332,7 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         uint256 totalValueInUsd;
         for (uint256 i = 0; i < investmentGains.length(); i++) {
             (address asset, uint256 gain) = investmentGains.at(i);
-            totalValueInUsd += AggregatorV3Interface(asset).getTokenValue(gain);
+            totalValueInUsd += AggregatorV3Interface(priceFeeds[asset]).getTokenValue(gain);
         }
         return totalValueInUsd;
     }
@@ -565,10 +565,9 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     }
 
     function _harvestAll() private {
-        EnumerableMap.AddressToUintMap storage investedAssets = aaveInvestment.investedAssets;
-        for (uint256 i = 0; i < investedAssets.length(); i++) {
-            (address asset, ) = investedAssets.at(i);
-            _harvest(asset, type(uint256).max);
+        address[] memory assets = aaveInvestment.investedAssets.keys();
+        for (uint256 i = 0; i < assets.length; i++) {
+            _harvest(assets[i], type(uint256).max);
         }
     }
 

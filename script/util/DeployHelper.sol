@@ -8,7 +8,10 @@ import {Constants} from "./Constants.sol";
 import {IVaultPlugin} from "../../src/interfaces/IVaultPlugin.sol"; 
 import {ISocialRecoveryPlugin} from "../../src/interfaces/ISocialRecoveryPlugin.sol"; 
 import {MockLinkToken} from "@chainlink/contracts/src/v0.8/mocks/MockLinkToken.sol";
-import {AaveV3Sepolia, IPoolAddressesProvider} from "aave-address-book/src/AaveV3Sepolia.sol";
+import {AaveV3Sepolia} from "aave-address-book/src/AaveV3Sepolia.sol";
+import {MockReserveInterestRateStrategy} from "@aave/contracts/mocks/tests/MockReserveInterestRateStrategy.sol";
+import {IPoolAddressesProvider} from "@aave/contracts/interfaces/IPoolAddressesProvider.sol";
+import {IPool} from "@aave/contracts/interfaces/IPool.sol";
 import {EntryPoint} from "account-abstraction/contracts/core/EntryPoint.sol";
 
 contract DeployHelper is Script, Constants {
@@ -23,6 +26,7 @@ contract DeployHelper is Script, Constants {
         address wbtcPriceFeedAddress;
         address aavePoolAddress;
         address aaveDataProviderAddress;
+        address aaveInterestRateStrategyAddress;
         uint256 investmentRatio;
         uint256 bonusRate;
         uint256 autoHarvestDuration;
@@ -56,10 +60,20 @@ contract DeployHelper is Script, Constants {
     }
 
     function _getAnvilEthSepoliaConfig() private returns (DeployConfig memory) {
-        (address wethPriceFeed, address wbtcPriceFeed) = _deploySepoliaMocks();
+        (
+            address wethPriceFeed, 
+            address wbtcPriceFeed,
+            address aaveInterestRateStrategy
+        ) = _deploySepoliaMocks();
         address aavePoolAddress = AaveV3Sepolia.POOL_ADDRESSES_PROVIDER.getPool();
         address wethTokenAddress = 0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c;
         address wbtcTokenAddress = 0x29f2D40B0605204364af54EC677bD022dA425d03;
+        // 5% liquidity rate
+        MockReserveInterestRateStrategy(aaveInterestRateStrategy).setLiquidityRate(5e25);
+        vm.startPrank(address(AaveV3Sepolia.POOL_ADDRESSES_PROVIDER.getPoolConfigurator()));
+        IPool(aavePoolAddress).setReserveInterestRateStrategyAddress(wethTokenAddress, aaveInterestRateStrategy);
+        IPool(aavePoolAddress).setReserveInterestRateStrategyAddress(wbtcTokenAddress, aaveInterestRateStrategy);
+        vm.stopPrank();
         collaterals = [wethTokenAddress, wbtcTokenAddress];
         priceFeeds = [wethPriceFeed, wbtcPriceFeed];
         return DeployConfig({
@@ -70,6 +84,7 @@ contract DeployHelper is Script, Constants {
             wbtcPriceFeedAddress: wbtcPriceFeed, // Real price feed: 0x1b44F3514812d835EB1BDB0acB33d3fA3351Ee43,
             aavePoolAddress: aavePoolAddress,
             aaveDataProviderAddress: address(AaveV3Sepolia.AAVE_PROTOCOL_DATA_PROVIDER),
+            aaveInterestRateStrategyAddress: aaveInterestRateStrategy,
             investmentRatio: 2 * 10 ** (PRECISION - 1), // 0.2
             bonusRate: 1 * 10 ** (PRECISION - 1), // 0.1
             autoHarvestDuration: 7 days,
@@ -105,6 +120,7 @@ contract DeployHelper is Script, Constants {
             wbtcPriceFeedAddress: wbtcPriceFeed,
             aavePoolAddress: address(0),
             aaveDataProviderAddress: address(0),
+            aaveInterestRateStrategyAddress: address(0),
             investmentRatio: 2 * 10 ** (PRECISION - 1), // 0.2
             bonusRate: 1 * 10 ** (PRECISION - 1), // 0.1
             autoHarvestDuration: 7 days,
@@ -141,9 +157,14 @@ contract DeployHelper is Script, Constants {
 
     function _deploySepoliaMocks() private returns (
         address wethPriceFeed,
-        address wbtcPriceFeed
+        address wbtcPriceFeed,
+        address aaveInterestRateStrategy
     ) {
         wethPriceFeed = address(new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(WETH_USD_PRICE)));
         wbtcPriceFeed = address(new MockV3Aggregator(PRICE_FEED_DECIMALS, int256(WBTC_USD_PRICE)));
+        MockReserveInterestRateStrategy strategy = new MockReserveInterestRateStrategy(
+            IPoolAddressesProvider(address(AaveV3Sepolia.POOL_ADDRESSES_PROVIDER)), 0, 0, 0, 0, 0, 0
+        );
+        aaveInterestRateStrategy = address(strategy);
     }
 }
