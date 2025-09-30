@@ -63,7 +63,7 @@ contract DeployHelper is Script, Constants {
         collaterals = [wethTokenAddress, wbtcTokenAddress];
         priceFeeds = [wethPriceFeed, wbtcPriceFeed];
         return DeployConfig({
-            account: 0x37CA3984F65bEB9400669c94faeEFaf1FC649964,
+            account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, // If I use my sepolia account, it will revert CreateCollision when deploying, don't know why, so change this to anvil rich account
             wethTokenAddress: 0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c,
             wethPriceFeedAddress: wethPriceFeed, // Real price feed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
             wbtcTokenAddress: 0x29f2D40B0605204364af54EC677bD022dA425d03,
