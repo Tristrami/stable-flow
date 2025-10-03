@@ -44,6 +44,7 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     error SFAccount__OperationNotSupported();
     error SFAccount__InvalidAddress();
     error SFAccount__InvalidTokenAmount();
+    error SFAccount__ApproveFailed();
     error SFAccount__TransferFailed();
 
     /* -------------------------------------------------------------------------- */

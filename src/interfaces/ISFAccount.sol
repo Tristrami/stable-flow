@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.30;
 
-import {ISocialRecoveryPlugin} from "./ISocialRecoveryPlugin.sol";
-import {IVaultPlugin} from "./IVaultPlugin.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 
-interface ISFAccount is ISocialRecoveryPlugin, IVaultPlugin, IERC165 {
+interface ISFAccount is IERC165 {
 
     /**
      * @dev Initialize a new SFAccount

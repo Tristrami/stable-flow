@@ -195,12 +195,16 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 collateralBalance = _getCollateralBalance(collateralAddress);
         if (collateralBalance < amountCollateral) {
-            revert VaultPlugin__InsufficientCollateral(
-                address($.sfEngine), 
-                collateralAddress, 
-                collateralBalance, 
-                amountCollateral
-            );
+            if (amountCollateral == type(uint256).max) {
+                amountCollateral = collateralBalance;
+            } else {
+                revert VaultPlugin__InsufficientCollateral(
+                    address($.sfEngine), 
+                    collateralAddress, 
+                    collateralBalance, 
+                    amountCollateral
+                );
+            }
         }
         uint256 amountSFToMint = $.sfEngine.calculateSFTokensByCollateral(
             collateralAddress, 

@@ -97,6 +97,7 @@ contract Deploy is Script {
             deployConfig.entryPointAddress, 
             sfEngine, 
             beacon, 
+            deployConfig.maxUserAccount,
             deployConfig.vaultConfig, 
             deployConfig.recoveryConfig
         );

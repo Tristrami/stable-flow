@@ -2,7 +2,10 @@
 pragma solidity ^0.8.30;
 
 import {Test} from "forge-std/Test.sol";
+import {IVaultPlugin} from "../../src/interfaces/IVaultPlugin.sol";
+import {ISocialRecoveryPlugin} from "../../src/interfaces/ISocialRecoveryPlugin.sol";
 import {SFEngine} from "../../src/token/SFEngine.sol";
+import {SFAccount} from "../../src/account/SFAccount.sol";
 import {SFAccountFactory} from "../../src/account/SFAccountFactory.sol";
 import {SFToken} from "../../src/token/SFToken.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
@@ -14,9 +17,12 @@ import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/Upgradeabl
 import {IPool} from "@aave/contracts/interfaces/IPool.sol";
 import {Ownable} from "@aave/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
 import {IEntryPoint} from "account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
 import "../../script/UserOperations.s.sol";
 
 contract SFAccountTest is Test, Constants {
+
+    using OracleLib for AggregatorV3Interface;
 
     event SFAccount__AccountCreated(address indexed owner);
 
@@ -25,6 +31,7 @@ contract SFAccountTest is Test, Constants {
         DeployHelper.DeployConfig deployConfig;
         SFEngine sfEngine;
         SFToken sfToken;
+        SFAccount sfAccount;
         SFAccountFactory sfAccountFactory;
         UpgradeableBeacon sfAccountBeacon;
     }
@@ -36,6 +43,7 @@ contract SFAccountTest is Test, Constants {
 
     address private user = makeAddr("user");
     address private randomUser = makeAddr("randomUser");
+    address private walletAccount = vm.rememberKey(0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a);
     TestData private localData;
     TestData private sepoliaData;
     TestData private $; // Current active test data
@@ -54,7 +62,23 @@ contract SFAccountTest is Test, Constants {
 
     function setUp() external {
         _setUpLocal();
-        // _setUpEthSepolia();
+        _setUpEthSepolia();
+    }
+
+    modifier accountCreated() {
+        address sfAccountAddress = _createSFAccount($.deployConfig.account);
+        $.sfAccount = SFAccount(sfAccountAddress);
+        _;
+    }
+
+    modifier deposited() {
+        _deposit(
+            $.deployConfig.account, 
+            address($.sfAccount), 
+            $.deployConfig.wethTokenAddress, 
+            INITIAL_USER_BALANCE
+        );
+        _;
     }
 
     function _setUpLocal() private {
@@ -79,6 +103,8 @@ contract SFAccountTest is Test, Constants {
         wbtc.transfer(user, INITIAL_USER_BALANCE);
         weth.transfer(randomUser, INITIAL_USER_BALANCE);
         wbtc.transfer(randomUser, INITIAL_USER_BALANCE);
+        weth.transfer(deployConfig.account, INITIAL_USER_BALANCE);
+        wbtc.transfer(deployConfig.account, INITIAL_USER_BALANCE);
         vm.stopPrank();
         vm.deal(localData.deployConfig.account, INITIAL_BALANCE);
     }
@@ -103,10 +129,12 @@ contract SFAccountTest is Test, Constants {
         vm.startPrank(Ownable(sepoliaData.deployConfig.wethTokenAddress).owner());
         weth.mint(user, INITIAL_USER_BALANCE);
         weth.mint(randomUser, INITIAL_USER_BALANCE);
+        weth.mint(deployConfig.account, INITIAL_USER_BALANCE);
         vm.stopPrank();
         vm.startPrank(Ownable(sepoliaData.deployConfig.wbtcTokenAddress).owner());
         wbtc.mint(user, INITIAL_USER_BALANCE);
         wbtc.mint(randomUser, INITIAL_USER_BALANCE);
+        wbtc.mint(deployConfig.account, INITIAL_USER_BALANCE);
         vm.stopPrank();
         // Let random user directly supply some weth and wbtc to aave
         vm.startPrank(randomUser);
@@ -129,23 +157,171 @@ contract SFAccountTest is Test, Constants {
     }
 
     function testCreateAccount() public localTest {
+        address account = $.deployConfig.account;
         CreateAccount createAccount = new CreateAccount();
         address calculatedAccountAddress = createAccount.calculateAccountAddress(
             address($.sfAccountFactory), 
             address($.sfAccountBeacon), 
-            createAccount.getSalt($.deployConfig.account)
+            createAccount.getSalt(account)
         );
         IEntryPoint($.deployConfig.entryPointAddress).depositTo{value: 1 ether}(calculatedAccountAddress);
         vm.expectEmit(true, false, false, false);
         emit SFAccount__AccountCreated($.deployConfig.account);
-        address actualAccountAddress = createAccount.createAccount(
-            address($.deployConfig.account),
+        address actualAccountAddress = createAccount.run(
+            address(account),
             address($.deployConfig.entryPointAddress),
             address($.sfAccountFactory), 
             address($.sfAccountBeacon)
         );
+        address[] memory storedSfAccounts = $.sfAccountFactory.getUserAccounts(account);
         assertEq(calculatedAccountAddress, actualAccountAddress);
+        assertEq(storedSfAccounts.length, 1);
+        assertEq(storedSfAccounts[0], actualAccountAddress);
     }
 
-    
+    function testUpdateCustomVaultConfig() public localTest accountCreated {
+        bool autoTopUpEnabled = false;
+        uint256 collateralRatio = 4 * PRECISION_FACTOR;
+        uint256 autoTopUpThreshold = collateralRatio;
+        IVaultPlugin.CustomVaultConfig memory config = $.sfAccount.getCustomVaultConfig();
+        config.autoTopUpEnabled = autoTopUpEnabled;
+        config.collateralRatio = collateralRatio;
+        config.autoTopUpThreshold = autoTopUpThreshold;
+        UpdateCustomVaultConfig updateCustomVaultConfig = new UpdateCustomVaultConfig();
+        updateCustomVaultConfig.run(
+            address($.sfAccountFactory),
+            $.deployConfig.entryPointAddress,
+            $.deployConfig.account,
+            address($.sfAccount),
+            config
+        );
+        IVaultPlugin.CustomVaultConfig memory updatedConfig = $.sfAccount.getCustomVaultConfig();
+        assertEq(updatedConfig.autoTopUpEnabled, autoTopUpEnabled);
+        assertEq(updatedConfig.collateralRatio, collateralRatio);
+        assertEq(updatedConfig.autoTopUpThreshold, autoTopUpThreshold);
+    }
+
+    function testDepositToSFAccount() public localTest accountCreated {
+        address collateral = $.deployConfig.wethTokenAddress;
+        address account = $.deployConfig.account;
+        address sfAccount = address($.sfAccount);
+        uint256 amountToDeposit = 1 * PRECISION_FACTOR;
+        uint256 startingCollateralBalance = $.sfAccount.getCollateralBalance(collateral);
+        uint256 startingUserBalance = IERC20(collateral).balanceOf(account);
+        uint256 startingSFAccountBalance = IERC20(collateral).balanceOf(sfAccount);
+        _deposit(
+            account, 
+            sfAccount, 
+            collateral, 
+            amountToDeposit
+        );
+        assertEq(
+            $.sfAccount.getCollateralBalance(collateral), 
+            startingCollateralBalance + amountToDeposit
+        );
+        assertEq(IERC20(collateral).balanceOf(account), startingUserBalance - amountToDeposit);
+        assertEq(IERC20(collateral).balanceOf(sfAccount), startingSFAccountBalance + amountToDeposit);
+    }
+
+    function testWithdrawFromSFAccount() public localTest accountCreated deposited {
+        address collateral = $.deployConfig.wethTokenAddress;
+        address account = $.deployConfig.account;
+        address sfAccount = address($.sfAccount);
+        uint256 amountToWithdraw = 1 * PRECISION_FACTOR;
+        uint256 startingCollateralBalance = $.sfAccount.getCollateralBalance(collateral);
+        uint256 startingUserBalance = IERC20(collateral).balanceOf(account);
+        uint256 startingSFAccountBalance = IERC20(collateral).balanceOf(sfAccount);
+        Withdraw withdraw = new Withdraw();
+        withdraw.run(
+            address($.sfAccountFactory), 
+            $.deployConfig.entryPointAddress,
+            account,
+            sfAccount,
+            collateral,
+            amountToWithdraw
+        );
+        assertEq($.sfAccount.getCollateralBalance(collateral), startingCollateralBalance - amountToWithdraw);
+        assertEq(IERC20(collateral).balanceOf(account), startingUserBalance + amountToWithdraw);
+        assertEq(IERC20(collateral).balanceOf(sfAccount), startingSFAccountBalance - amountToWithdraw);
+    }
+
+    function testInvestToSFProtocol() public ethSepoliaTest accountCreated deposited {
+        address weth = $.deployConfig.wethTokenAddress;
+        uint256 amountToInvest = 2 * PRECISION_FACTOR;
+        uint256 collateralRatio = $.sfAccount.getCustomCollateralRatio();
+        uint256 amountSFToMint = $.sfEngine.calculateSFTokensByCollateral(weth, amountToInvest, collateralRatio);
+        uint256 amountSuppliedToAave = amountToInvest * $.sfEngine.getInvestmentRatio() / PRECISION_FACTOR;
+        uint256 startingAccountSFBalance = $.sfAccount.balance();
+        uint256 startingAccountWethBalance = IERC20(weth).balanceOf(address($.sfAccount));
+        uint256 startingEngineWethBalance = IERC20(weth).balanceOf(address($.sfEngine));
+        Invest invest = new Invest();
+        invest.run(
+            address($.sfAccountFactory), 
+            $.deployConfig.entryPointAddress,
+            $.deployConfig.account,
+            address($.sfAccount),
+            weth,
+            amountToInvest
+        );
+        assertEq($.sfAccount.balance(), startingAccountSFBalance + amountSFToMint);
+        assertEq(
+            IERC20(weth).balanceOf(address($.sfAccount)), 
+            startingAccountWethBalance - amountToInvest
+        );
+        assertEq(
+            IERC20(weth).balanceOf(address($.sfEngine)), 
+            startingEngineWethBalance + amountToInvest - amountSuppliedToAave
+        );
+    }
+
+    function testTransfer() public localTest accountCreated deposited {
+        Transfer transfer = new Transfer();
+        SFAccount sender = $.sfAccount;
+        SFAccount receiver = SFAccount(_createSFAccount(walletAccount));
+
+
+        uint256 amountToTransfer = 2 * PRECISION_FACTOR;
+        uint256 startingSenderBalance = sender.balance();
+        uint256 startingReceiverBalance = receiver.balance();
+        transfer.run(
+            address($.sfAccountFactory), 
+            $.deployConfig.entryPointAddress,
+            $.deployConfig.account,
+            address(sender),
+            address(receiver),
+            amountToTransfer
+        );
+        assertEq(sender.balance(), startingSenderBalance - amountToTransfer);
+        assertEq(receiver.balance(), startingReceiverBalance + amountToTransfer);
+    }
+
+    function _createSFAccount(address account) private returns (address) {
+        CreateAccount createAccount = new CreateAccount();
+        address calculatedAccountAddress = createAccount.calculateAccountAddress(
+            address($.sfAccountFactory), 
+            address($.sfAccountBeacon), 
+            createAccount.getSalt(account)
+        );
+        IEntryPoint($.deployConfig.entryPointAddress).depositTo{value: 1 ether}(calculatedAccountAddress);
+        return createAccount.run(
+            account,
+            address($.deployConfig.entryPointAddress),
+            address($.sfAccountFactory), 
+            address($.sfAccountBeacon)
+        );
+    }
+
+    function _deposit(address account, address sfAccount, address collateral, uint256 amount) private {
+        vm.prank(account);
+        IERC20(collateral).approve(sfAccount, amount);
+        Deposit deposit = new Deposit();
+        deposit.run(
+            address($.sfAccountFactory), 
+            address($.deployConfig.entryPointAddress),
+            account,
+            sfAccount,
+            collateral,
+            amount
+        );
+    }
 }

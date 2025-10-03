@@ -4,7 +4,6 @@ pragma solidity ^0.8.30;
 import {FreezePlugin} from "./FreezePlugin.sol";
 import {ISocialRecoveryPlugin} from "../../interfaces/ISocialRecoveryPlugin.sol";
 import {ISFEngine} from "../../interfaces/ISFEngine.sol";
-import {ISFAccount} from "../../interfaces/ISFAccount.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
@@ -178,7 +177,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         requireNotFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveInitiateRecover(newOwner);
+        ISocialRecoveryPlugin(account).receiveInitiateRecover(newOwner);
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -216,7 +215,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         requireNotFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveApproveRecovery();
+        ISocialRecoveryPlugin(account).receiveApproveRecovery();
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -246,7 +245,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         requireNotFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveCancelRecovery();
+        ISocialRecoveryPlugin(account).receiveCancelRecovery();
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -266,7 +265,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         requireNotFrozen 
         recoverableAccount(account) 
     {
-        ISFAccount(account).receiveCompleteRecovery();
+        ISocialRecoveryPlugin(account).receiveCompleteRecovery();
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -437,7 +436,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
 
     function _requireSupportsSocialRecovery(address account) private view {
         _requireSFAccount(account);
-        if (!ISFAccount(account).supportsSocialRecovery()) {
+        if (!ISocialRecoveryPlugin(account).supportsSocialRecovery()) {
             revert SocialRecoveryPlugin__SocialRecoveryNotSupported();
         }
     }

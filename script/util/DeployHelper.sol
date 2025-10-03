@@ -34,6 +34,7 @@ contract DeployHelper is Script, Constants {
         address automationRegistryAddress;
         address linkTokenAddress;
         address entryPointAddress;
+        uint256 maxUserAccount;
         IVaultPlugin.VaultConfig vaultConfig;
         ISocialRecoveryPlugin.RecoveryConfig recoveryConfig;
     }
@@ -94,7 +95,8 @@ contract DeployHelper is Script, Constants {
             autoHarvestDuration: 7 days,
             automationRegistryAddress: 0x86EFBD0b6736Bed994962f9797049422A3A8E8Ad,
             linkTokenAddress: 0x779877A7B0D9E8603169DdbD7836e478b4624789,
-            entryPointAddress: 0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789,
+            entryPointAddress: 0x305F5521ed2376d19001E65C51e8Ba7895BD01aE,
+            maxUserAccount: 10,
             vaultConfig: IVaultPlugin.VaultConfig({
                 collaterals: collaterals, 
                 priceFeeds: priceFeeds
@@ -131,6 +133,7 @@ contract DeployHelper is Script, Constants {
             automationRegistryAddress: address(0),
             linkTokenAddress: linkToken,
             entryPointAddress: entryPoint,
+            maxUserAccount: 10,
             vaultConfig: IVaultPlugin.VaultConfig({
                 collaterals: collaterals, 
                 priceFeeds: priceFeeds

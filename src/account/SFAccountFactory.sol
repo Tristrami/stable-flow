@@ -20,8 +20,10 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
     using ERC165Checker for address;
 
     error SFAccountFactory__OnlyOwner();
+    error SFAccountFactory__MaxUserAccountCanNotBeZero();
     error SFAccountFactory__IncompatibleImplementation();
     error SFAccountFactory__NotFromEntryPoint();
+    error SFAccountFactory__AccountLimitReached(uint256 limit);
 
     event SFAccountFactory__CreateAccount(address indexed account, address indexed owner);
 
@@ -31,11 +33,14 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
     address private beaconAddress;
     IVaultPlugin.VaultConfig private vaultConfig;
     ISocialRecoveryPlugin.RecoveryConfig private recoveryConfig;
+    uint256 private maxUserAccount;
+    mapping(address user => address[] sfAccounts) private userAccounts;
 
     function initialize(
         address _entryPointAddress,
         address _sfEngineAddress,
         address _beaconAddress,
+        uint256 _maxUserAccount,
         IVaultPlugin.VaultConfig memory _vaultConfig,
         ISocialRecoveryPlugin.RecoveryConfig memory _recoveryConfig
     ) external initializer {
@@ -46,28 +51,80 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
         beaconAddress = _beaconAddress;
         vaultConfig = _vaultConfig;
         recoveryConfig = _recoveryConfig;
+        if (_maxUserAccount == 0) {
+            revert SFAccountFactory__MaxUserAccountCanNotBeZero();
+        }
+        maxUserAccount = _maxUserAccount;
+    }
+
+    function reinitialize(
+        uint64 _version,
+        uint256 _maxUserAccount,
+        IVaultPlugin.VaultConfig memory _vaultConfig,
+        ISocialRecoveryPlugin.RecoveryConfig memory _recoveryConfig
+    ) external reinitializer(_version) {
+        vaultConfig = _vaultConfig;
+        recoveryConfig = _recoveryConfig;
+        if (_maxUserAccount == 0) {
+            revert SFAccountFactory__MaxUserAccountCanNotBeZero();
+        }
     }
 
     function createSFAccount(
-        address _accountOwner,
-        bytes32 _salt,
-        IVaultPlugin.CustomVaultConfig memory _customVaultConfig,
-        ISocialRecoveryPlugin.CustomRecoveryConfig memory _customRecoveryConfig
+        address accountOwner,
+        bytes32 salt,
+        IVaultPlugin.CustomVaultConfig memory customVaultConfig,
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory customRecoveryConfig
     ) external returns (address) {
-        address accountProxyAddress = _deployBeaconProxy(_salt);
+        address[] memory sfAccounts = userAccounts[accountOwner];
+        if (sfAccounts.length == maxUserAccount) {
+            revert SFAccountFactory__AccountLimitReached(maxUserAccount);
+        }
+        address accountProxyAddress = _deployBeaconProxy(salt);
+        userAccounts[accountOwner].push(accountProxyAddress);
         SFAccount accountProxy = SFAccount(accountProxyAddress);
         accountProxy.initialize(
-            _accountOwner,
+            accountOwner,
             entryPointAddress,
             sfEngineAddress,
             address(this),
             vaultConfig,
-            _customVaultConfig,
+            customVaultConfig,
             recoveryConfig,
-            _customRecoveryConfig
+            customRecoveryConfig
         );  
-        emit SFAccountFactory__CreateAccount(accountProxyAddress, _accountOwner);
+        emit SFAccountFactory__CreateAccount(accountProxyAddress, accountOwner);
         return accountProxyAddress;
+    }
+
+    function getUserAccounts(address user) external view returns (address[] memory) {
+        return userAccounts[user];
+    }
+
+    function getVaultConfig() external view returns (IVaultPlugin.VaultConfig memory) {
+        return vaultConfig;
+    }
+
+    function getRecoveryConfig() external view returns (ISocialRecoveryPlugin.RecoveryConfig memory) {
+        return recoveryConfig;
+    }
+
+    function getInitCode(
+        address accountOwner,
+        bytes32 salt,
+        IVaultPlugin.CustomVaultConfig memory customVaultConfig,
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory customRecoveryConfig
+    ) external view returns (bytes memory) {
+        bytes memory initCallData = abi.encodeCall(
+            SFAccountFactory.createSFAccount, 
+            (
+                accountOwner,
+                salt,
+                customVaultConfig,
+                customRecoveryConfig
+            )
+        );
+        return abi.encodePacked(address(this), initCallData);
     }
 
     function _deployBeaconProxy(bytes32 salt) private returns (address) {
