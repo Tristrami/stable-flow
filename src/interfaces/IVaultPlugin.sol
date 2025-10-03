@@ -20,15 +20,15 @@ interface IVaultPlugin {
      * @notice Contains vault-specific configuration parameters that can be customized per vault
      */
     struct CustomVaultConfig {
-        /// @dev The collateral ratio used for investment operations
-        /// @notice Must be greater than or equal to the minimum collateral ratio supported by SFEngine
-        uint256 collateralRatio;
         /// @dev Flag indicating whether automatic collateral top-up is enabled
         bool autoTopUpEnabled;
         /// @dev The collateral ratio threshold that triggers automatic top-up
         /// @notice When collateral ratio falls below this value and autoTopUpEnabled is true,
         /// the system will attempt to automatically add more collateral
         uint256 autoTopUpThreshold;
+        /// @dev The collateral ratio used for investment operations
+        /// @notice Must be greater than or equal to the minimum collateral ratio supported by SFEngine
+        uint256 collateralRatio;
     }
 
     /**

@@ -18,17 +18,17 @@ interface ISocialRecoveryPlugin {
      * @notice Contains account-specific recovery parameters that can be customized
      */
     struct CustomRecoveryConfig {
-        /// @dev Flag indicating whether social recovery is enabled for this account
-        bool socialRecoveryEnabled;
+        /// @dev Array of addresses authorized as guardians for this account
+        /// @notice Guardians can initiate and approve recovery processes
+        address[] guardians;
         /// @dev Minimum number of guardian approvals required to execute recovery
         /// @notice Must be less than or equal to total number of guardians
         uint8 minGuardianApprovals;
         /// @dev Time delay (in seconds) required before recovery can be executed
         /// @notice Prevents immediate account takeover, providing a safety window
         uint256 recoveryTimeLock;
-        /// @dev Array of addresses authorized as guardians for this account
-        /// @notice Guardians can initiate and approve recovery processes
-        address[] guardians;
+        /// @dev Flag indicating whether social recovery is enabled for this account
+        bool socialRecoveryEnabled;
     }
 
     /**

@@ -9,7 +9,6 @@ import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165C
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {Create2} from "@openzeppelin/contracts/utils/Create2.sol";
 
 /**
  * @title SFAccountFactory
@@ -51,12 +50,11 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
 
     function createSFAccount(
         address _accountOwner,
-        bytes32 salt,
+        bytes32 _salt,
         IVaultPlugin.CustomVaultConfig memory _customVaultConfig,
         ISocialRecoveryPlugin.CustomRecoveryConfig memory _customRecoveryConfig
     ) external returns (address) {
-        _requireFromEntryPoint();
-        address accountProxyAddress = _deployBeaconProxy(salt);
+        address accountProxyAddress = _deployBeaconProxy(_salt);
         SFAccount accountProxy = SFAccount(accountProxyAddress);
         accountProxy.initialize(
             _accountOwner,
@@ -73,12 +71,7 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
     }
 
     function _deployBeaconProxy(bytes32 salt) private returns (address) {
-        bytes memory byteCode = abi.encodePacked(
-            type(BeaconProxy).creationCode,
-            beaconAddress,
-            hex""
-        );
-        return Create2.deploy(0, salt, byteCode);
+        return address(new BeaconProxy{salt: salt}(beaconAddress, ""));
     }
 
     function _authorizeUpgrade(address newImplementation) internal view override onlyOwner {

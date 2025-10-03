@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Script} from "forge-std/Script.sol";
+import {DevOps} from "./DevOps.s.sol";
 import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {Constants} from "./Constants.sol";
@@ -40,6 +41,9 @@ contract DeployHelper is Script, Constants {
     DeployConfig private activeConfig;
     address[] private collaterals;
     address[] private priceFeeds;
+    string[] private names;
+    address[] private deployments;
+    DevOps devOps = new DevOps();
 
     constructor() {
         _initialize();
@@ -77,7 +81,7 @@ contract DeployHelper is Script, Constants {
         collaterals = [wethTokenAddress, wbtcTokenAddress];
         priceFeeds = [wethPriceFeed, wbtcPriceFeed];
         return DeployConfig({
-            account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, // If I use my sepolia account, it will revert CreateCollision when deploying, don't know why, so change this to anvil rich account
+            account: vm.rememberKey(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80), // Add a private key to the local forge wallet in convenience of `vm.sign()`
             wethTokenAddress: 0xC558DBdd856501FCd9aaF1E62eae57A9F0629a3c,
             wethPriceFeedAddress: wethPriceFeed, // Real price feed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
             wbtcTokenAddress: 0x29f2D40B0605204364af54EC677bD022dA425d03,
@@ -113,7 +117,7 @@ contract DeployHelper is Script, Constants {
         collaterals = [wrappedEth, wrappedBtc];
         priceFeeds = [wethPriceFeed, wbtcPriceFeed];
         return DeployConfig({
-            account: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266,
+            account: vm.rememberKey(0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80), // Add a private key to the local forge wallet in convenience of `vm.sign()`
             wethTokenAddress: wrappedEth,
             wethPriceFeedAddress: wethPriceFeed,
             wbtcTokenAddress: wrappedBtc,
@@ -153,6 +157,7 @@ contract DeployHelper is Script, Constants {
         linkToken =  address(new MockLinkToken());
         entryPoint = address(new EntryPoint());
         vm.stopBroadcast();
+        _saveLocalDeployment(wrappedEth, wethPriceFeed, wrappedBtc, wbtcPriceFeed, linkToken, entryPoint);
     }
 
     function _deploySepoliaMocks() private returns (
@@ -166,5 +171,29 @@ contract DeployHelper is Script, Constants {
             IPoolAddressesProvider(address(AaveV3Sepolia.POOL_ADDRESSES_PROVIDER)), 0, 0, 0, 0, 0, 0
         );
         aaveInterestRateStrategy = address(strategy);
+        _saveSepoliaDeployment(wethPriceFeed, wbtcPriceFeed, aaveInterestRateStrategy);
+    }
+
+    function _saveLocalDeployment(
+        address wrappedEth,
+        address wethPriceFeed,
+        address wrappedBtc,
+        address wbtcPriceFeed,
+        address linkToken,
+        address entryPoint
+    ) private {
+        names = ["WrappedEth", "WethPriceFeed", "WrappedBtc", "WbtcPriceFeed", "LinkToken", "EntryPoint"];
+        deployments = [wrappedEth, wethPriceFeed, wrappedBtc, wbtcPriceFeed, linkToken, entryPoint];
+        devOps.saveDeployment(names, deployments);
+    }
+
+    function _saveSepoliaDeployment(
+        address wethPriceFeed,
+        address wbtcPriceFeed,
+        address aaveInterestRateStrategy
+    ) private {
+        names = ["WethPriceFeed", "WbtcPriceFeed", "AaveInterestRateStrategy"];
+        deployments = [wethPriceFeed, wbtcPriceFeed, aaveInterestRateStrategy];
+        devOps.saveDeployment(names, deployments);
     }
 }

@@ -1,0 +1,13 @@
+{
+  "customVaultConfig": {
+    "autoTopUpEnabled": true,
+    "autoTopUpThreshold": 2500000000000000000,
+    "collateralRatio": 2500000000000000000
+  },
+  "customRecoveryConfig": {
+    "guardians": [],
+    "minGuardianApprovals": 0,
+    "recoveryTimeLock": 0,
+    "socialRecoveryEnabled": false
+  }
+}

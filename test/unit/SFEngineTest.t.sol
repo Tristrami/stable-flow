@@ -10,7 +10,7 @@ import {DeployHelper} from "../../script/util/DeployHelper.sol";
 import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
-import {IERC20} from "@openzeppelin/contracts/token/erc20/IERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolDataProvider} from "aave-address-book/src/AaveV3.sol";
 import {IPool} from "@aave/contracts/interfaces/IPool.sol";
 import {Ownable} from "@aave/contracts/dependencies/openzeppelin/contracts/Ownable.sol";

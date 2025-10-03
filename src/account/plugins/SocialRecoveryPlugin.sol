@@ -138,10 +138,10 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         CustomRecoveryConfig memory customRecoveryConfig,
         ISFEngine sfEngine
     ) internal {
-        _updateSocialRecoveryConfig(recoveryConfig);
-        _updateCustomSocialRecoveryConfig(customRecoveryConfig);
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         $.sfEngine = sfEngine;
+        _updateSocialRecoveryConfig(recoveryConfig);
+        _updateCustomSocialRecoveryConfig(customRecoveryConfig);
     }
 
     /* -------------------------------------------------------------------------- */

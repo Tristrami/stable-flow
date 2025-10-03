@@ -23,6 +23,7 @@ rpc_endpoints = { ethSepolia = "http://localhost:8546", local = "http://localhos
 fs_permissions = [
     { access = "read", path = "./broadcast" },
     { access = "read", path = "./reports" },
+    { access = "read-write", path = "script/config" }
 ]
 
 [invariant]

@@ -171,10 +171,10 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         address sfTokenAddress
     ) internal onlyInitializing {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        _updateVaultConfig(vaultConfig);
-        _updateCustomVaultConfig(customVaultConfig);
         $.sfEngine = sfEngine;
         $.sfTokenAddress = sfTokenAddress;
+        _updateVaultConfig(vaultConfig);
+        _updateCustomVaultConfig(customVaultConfig);
     }
 
     /* -------------------------------------------------------------------------- */
