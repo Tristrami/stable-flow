@@ -3,6 +3,84 @@ pragma solidity ^0.8.30;
 
 interface IVaultPlugin {
 
+    /* -------------------------------------------------------------------------- */
+    /*                                   Errors                                   */
+    /* -------------------------------------------------------------------------- */
+
+    error IVaultPlugin__CollateralNotSupported(address collateral);
+    error IVaultPlugin__CollateralsAndPriceFeedsCanNotBeEmpty();
+    error IVaultPlugin__MismatchBetweenCollateralsAndPriceFeeds(
+        uint256 numCollaterals, 
+        uint256 numPriceFeeds
+    );
+    error IVaultPlugin__InsufficientCollateral(
+        address receiver, 
+        address collateralAddress, 
+        uint256 balance, 
+        uint256 required
+    );
+    error IVaultPlugin__DebtToRepayExceedsTotalDebt(uint256 debtToRepay, uint256 totalDebt);
+    error IVaultPlugin__TopUpNotNeeded(
+        uint256 currentCollateralInUsd, 
+        uint256 requiredCollateralInUsd, 
+        uint256 targetCollateralRatio
+    );
+    error IVaultPlugin__TopUpThresholdTooSmall(uint256 topUpThreshold, uint256 liquidationThreshold);
+    error IVaultPlugin__CustomCollateralRatioTooSmall(uint256 collateralRatio, uint256 minCollateralRatio);
+    error IVaultPlugin__NotSFAccount(address account);
+    error IVaultPlugin__InsufficientBalance(address receiver, uint256 balance, uint256 required);
+    error IVaultPlugin__TokenAmountCanNotBeZero();
+    error IVaultPlugin__TransferFailed();
+    error IVaultPlugin__NotFromEntryPoint();
+
+    /* -------------------------------------------------------------------------- */
+    /*                                   Events                                   */
+    /* -------------------------------------------------------------------------- */
+
+    event IVaultPlugin__UpdateCollateralAndPriceFeed(uint256 indexed numCollateral);
+    event IVaultPlugin__Invest(
+        address indexed collateralAddress, 
+        uint256 indexed amountCollateral, 
+        uint256 indexed sfToMint
+    );
+    event IVaultPlugin__Harvest(
+        address indexed collateralAddress, 
+        uint256 indexed amountCollateralToRedeem, 
+        uint256 indexed debtToRepay
+    );
+    event IVaultPlugin__Liquidate(
+        address indexed account, 
+        address indexed collateralAddress, 
+        uint256 indexed debtToCover
+    );
+    event IVaultPlugin__Danger(
+        uint256 indexed currentCollateralRatio, 
+        uint256 indexed liquidatingCollateralRatio
+    );
+    event IVaultPlugin__TopUpCollateral(
+        address indexed collateralAddress, 
+        uint256 indexed amountCollateral
+    );
+    event IVaultPlugin__CollateralRatioMaintained(
+        uint256 indexed collateralTopedUpInUsd, 
+        uint256 indexed targetCollateralRatio
+    );
+    event IVaultPlugin__InsufficientCollateralForTopUp(
+        uint256 indexed requiredCollateralInUsd, 
+        uint256 indexed currentCollateralRatio, 
+        uint256 indexed targetCollateralRatio
+    );
+    event IVaultPlugin__Deposit(address indexed collateralAddress, uint256 indexed amount);
+    event IVaultPlugin__Withdraw(address indexed collateralAddress, uint256 indexed amount);
+    event IVaultPlugin__AddNewCollateral(address indexed collateralAddress);
+    event IVaultPlugin__RemoveCollateral(address indexed collateralAddress);
+    event IVaultPlugin__UpdateVaultConfig(bytes configData);
+    event IVaultPlugin__UpdateCustomVaultConfig(bytes configData);
+
+    /* -------------------------------------------------------------------------- */
+    /*                                    Types                                   */
+    /* -------------------------------------------------------------------------- */
+
     /**
      * @dev Vault configuration structure
      * @notice Contains the basic configuration parameters for a vault
@@ -41,7 +119,7 @@ interface IVaultPlugin {
      * - Approve the sfEngine to spend the collateral
      * - Deposit collateral and mint SF tokens through the sfEngine
      * @notice Reverts if:
-     * - Caller doesn't have enough collateral (VaultPlugin__InsufficientCollateral)
+     * - Caller doesn't have enough collateral (IVaultPlugin__InsufficientCollateral)
      * - Contract is frozen (requireNotFrozen modifier)
      * - Collateral is not supported (requireSupportedCollateral modifier)
      * - Caller is not the entry point (onlyEntryPoint modifier)
@@ -60,7 +138,7 @@ interface IVaultPlugin {
      * - Check if the contract has sufficient SF token balance
      * - Redeem collateral through the sfEngine
      * @notice Reverts if:
-     * - Contract doesn't have enough SF tokens (VaultPlugin__InsufficientBalance)
+     * - Contract doesn't have enough SF tokens (IVaultPlugin__InsufficientBalance)
      * - Contract is frozen (requireNotFrozen modifier)
      * - Collateral is not supported (requireSupportedCollateral modifier)
      * - Caller is not the entry point (onlyEntryPoint modifier)
@@ -81,7 +159,7 @@ interface IVaultPlugin {
      * - Approve the sfEngine to spend SF tokens
      * - Execute liquidation through the sfEngine
      * @notice Reverts if:
-     * - Contract doesn't have enough SF tokens (VaultPlugin__InsufficientBalance)
+     * - Contract doesn't have enough SF tokens (IVaultPlugin__InsufficientBalance)
      * - Contract is frozen (requireNotFrozen modifier)
      * - Collateral is not supported (requireSupportedCollateral modifier)
      * - Account is not an SFAccount (onlySFAccount modifier)
@@ -137,8 +215,8 @@ interface IVaultPlugin {
      * - Track new collateral types added to the vault
      * - Transfer collateral from owner to vault
      * @notice Reverts if:
-     * - Amount is zero (VaultPlugin__InvalidTokenAmount)
-     * - Transfer fails (VaultPlugin__TransferFailed)
+     * - Amount is zero (IVaultPlugin__InvalidTokenAmount)
+     * - Transfer fails (IVaultPlugin__TransferFailed)
      * - Contract is frozen (requireNotFrozen modifier)
      * - Collateral is not supported (requireSupportedCollateral modifier)
      * - Caller is not the entry point (onlyEntryPoint modifier)
@@ -154,10 +232,10 @@ interface IVaultPlugin {
      * - Remove collateral from tracking if balance reaches zero
      * - Transfer collateral back to owner
      * @notice Reverts if:
-     * - Collateral address is zero (VaultPlugin__InvalidTokenAddress)
-     * - Amount is zero (VaultPlugin__InvalidTokenAmount)
-     * - Insufficient collateral balance (VaultPlugin__InsufficientCollateral)
-     * - Transfer fails (VaultPlugin__TransferFailed)
+     * - Collateral address is zero (IVaultPlugin__InvalidTokenAddress)
+     * - Amount is zero (IVaultPlugin__InvalidTokenAmount)
+     * - Insufficient collateral balance (IVaultPlugin__InsufficientCollateral)
+     * - Transfer fails (IVaultPlugin__TransferFailed)
      * - Contract is frozen (requireNotFrozen modifier)
      * - Caller is not the entry point (onlyEntryPoint modifier)
      */
@@ -166,9 +244,17 @@ interface IVaultPlugin {
     /**
      * @dev Get the balance of a specific collateral token in the vault
      * @param collateralAddress The address of collateral token to query
-     * @return uint256 The current balance of the specified collateral
+     * @return uint256 The current balance of the specified collateral (18 decimals)
      */
     function getCollateralBalance(address collateralAddress) external view returns (uint256);
+
+    /**
+     * @notice Gets the amount of collateral currently invested in yield strategies
+     * @dev Returns the total invested amount for a specific collateral token
+     * @param collateralAddress Address of the collateral token to query
+     * @return uint256 Amount of collateral invested (18 decimals)
+     */
+    function getCollateralInvested(address collateralAddress) external view returns (uint256);
 
     /**
      * @dev Get the custom collateral ratio for this vault

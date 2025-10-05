@@ -43,7 +43,9 @@ abstract contract BaseSFAccountPlugin is ISFAccount, BaseAccount, OwnableUpgrade
     }
 
     function _requireSFAccount(address account) internal view {
-        if (!account.supportsInterface(type(ISFAccount).interfaceId)) {
+        if (account == address(0) 
+            || account.code.length == 0
+            || !account.supportsInterface(type(ISFAccount).interfaceId)) {
             revert BaseSFAccountPlugin__NotSFAccount(account);
         }
     }

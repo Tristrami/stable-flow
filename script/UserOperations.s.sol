@@ -54,10 +54,6 @@ contract BaseOperation is Script, Constants {
         return userOp;
     }
 
-    function getSalt(address sfAccountOwner) public pure returns (bytes32) {
-        return bytes32(uint256(uint160(sfAccountOwner)));
-    }
-
     function getInitCode(address sfAccountFactoryAddress, address user) public view returns (bytes memory) {
         string memory accountConfigJson = vm.readFile("script/config/AccountConfig.json");
         bytes memory customVaultConfigBytes = vm.parseJson(accountConfigJson, ".customVaultConfig");
@@ -72,7 +68,7 @@ contract BaseOperation is Script, Constants {
         );
         return SFAccountFactory(sfAccountFactoryAddress).getInitCode(
             user, 
-            getSalt(user), 
+            SFAccountFactory(sfAccountFactoryAddress).getSFAccountSalt(user), 
             customVaultConfig, 
             customRecoveryConfig
         );
@@ -160,8 +156,10 @@ contract CreateAccount is BaseOperation {
         address sfAccountFactoryAddress, 
         address beaconAddress
     ) public returns (address sfAccount) {
-        bytes32 salt = getSalt(user);
-        sfAccount = calculateAccountAddress(sfAccountFactoryAddress, beaconAddress, salt);
+        bytes32 salt = SFAccountFactory(sfAccountFactoryAddress).getSFAccountSalt(user);
+        sfAccount = SFAccountFactory(
+            sfAccountFactoryAddress
+        ).calculateAccountAddress(beaconAddress, salt);
         console2.log("Calculated sf account address:", sfAccount);
         bytes memory initCode = getInitCode(sfAccountFactoryAddress, user);
         bytes memory callData = abi.encodeCall(ISFAccount.createAccount, ());

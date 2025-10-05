@@ -3,6 +3,61 @@ pragma solidity ^0.8.30;
 
 interface IFreezePlugin {
 
+    /* -------------------------------------------------------------------------- */
+    /*                                   Errors                                   */
+    /* -------------------------------------------------------------------------- */
+
+    /**
+     * @dev Reverts when operation requires frozen account but account is active
+     */
+    error IFreezePlugin__AccountIsNotFrozen();
+
+    /**
+     * @dev Reverts when operation requires active account but account is frozen
+     */
+    error IFreezePlugin__AccountIsFrozen();
+
+    /* -------------------------------------------------------------------------- */
+    /*                                   Events                                   */
+    /* -------------------------------------------------------------------------- */
+
+    /**
+     * @dev Emitted when an account is frozen
+     * @param frozenBy Address that initiated the freeze
+     */
+    event IFreezePlugin__FreezeAccount(address indexed frozenBy);
+
+    /**
+     * @dev Emitted when an account is unfrozen
+     * @param unfrozenBy Address that executed the unfreeze
+     */
+    event IFreezePlugin__UnfreezeAccount(address indexed unfrozenBy);
+
+    /* -------------------------------------------------------------------------- */
+    /*                                    Types                                   */
+    /* -------------------------------------------------------------------------- */
+
+    /**
+     * @dev Record tracking account freeze/unfreeze events
+     * @notice Used for security auditing and account state history tracking
+     * @notice Maintains complete lifecycle of each freeze operation
+     */
+    struct FreezeRecord {
+        /// @dev Address that initiated the freeze operation
+        /// @notice Typically the EntryPoint or guardians
+        address frozenBy;
+        /// @dev Address that executed unfreeze operation
+        /// @notice Zero address (0x0) indicates still frozen state
+        address unfrozenBy;
+        /// @dev Current state flag for this freeze record
+        /// @notice true = unfrozen, false = currently frozen
+        bool isUnfozen;
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                                  Functions                                 */
+    /* -------------------------------------------------------------------------- */
+
     /**
      * @dev Freeze this account
      * @notice Requirements:

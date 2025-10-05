@@ -38,79 +38,6 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     using ERC165Checker for address;
 
     /* -------------------------------------------------------------------------- */
-    /*                                   Errors                                   */
-    /* -------------------------------------------------------------------------- */
-
-    error VaultPlugin__CollateralNotSupported(address collateral);
-    error VaultPlugin__MismatchBetweenCollateralAndPriceFeeds(
-        uint256 numCollaterals, 
-        uint256 numPriceFeeds
-    );
-    error VaultPlugin__InsufficientCollateral(
-        address receiver, 
-        address collateralAddress, 
-        uint256 balance, 
-        uint256 required
-    );
-    error VaultPlugin__TopUpNotNeeded(
-        uint256 currentCollateralInUsd, 
-        uint256 requiredCollateralInUsd, 
-        uint256 targetCollateralRatio
-    );
-    error VaultPlugin__TopUpThresholdTooSmall(uint256 topUpThreshold, uint256 liquidationThreshold);
-    error VaultPlugin__CustomCollateralRatioTooSmall(uint256 collateralRatio, uint256 minCollateralRatio);
-    error VaultPlugin__NotSFAccount(address account);
-    error VaultPlugin__InsufficientBalance(address receiver, uint256 balance, uint256 required);
-    error VaultPlugin__InvalidTokenAmount(uint256 tokenAmount);
-    error VaultPlugin__TransferFailed();
-    error VaultPlugin__InvalidTokenAddress(address tokenAddress);
-    error VaultPlugin__NotFromEntryPoint();
-
-    /* -------------------------------------------------------------------------- */
-    /*                                   Events                                   */
-    /* -------------------------------------------------------------------------- */
-
-    event VaultPlugin__UpdateCollateralAndPriceFeed(uint256 indexed numCollateral);
-    event VaultPlugin__Invest(
-        address indexed collateralAddress, 
-        uint256 indexed amountCollateral, 
-        uint256 indexed sfToMint
-    );
-    event VaultPlugin__Harvest(
-        address indexed collateralAddress, 
-        uint256 indexed amountCollateralToRedeem, 
-        uint256 indexed debtToRepay
-    );
-    event VaultPlugin__Liquidate(
-        address indexed account, 
-        address indexed collateralAddress, 
-        uint256 indexed debtToCover
-    );
-    event VaultPlugin__Danger(
-        uint256 indexed currentCollateralRatio, 
-        uint256 indexed liquidatingCollateralRatio
-    );
-    event VaultPlugin__TopUpCollateral(
-        address indexed collateralAddress, 
-        uint256 indexed amountCollateral
-    );
-    event VaultPlugin__CollateralRatioMaintained(
-        uint256 indexed collateralTopedUpInUsd, 
-        uint256 indexed targetCollateralRatio
-    );
-    event VaultPlugin__InsufficientCollateralForTopUp(
-        uint256 indexed requiredCollateralInUsd, 
-        uint256 indexed currentCollateralRatio, 
-        uint256 indexed targetCollateralRatio
-    );
-    event VaultPlugin__Deposit(address indexed collateralAddress, uint256 indexed amount);
-    event VaultPlugin__Withdraw(address indexed collateralAddress, uint256 indexed amount);
-    event VaultPlugin__AddNewCollateral(address indexed collateralAddress);
-    event VaultPlugin__RemoveCollateral(address indexed collateralAddress);
-    event VaultPlugin__UpdateVaultConfig(bytes configData);
-    event VaultPlugin__UpdateCustomVaultConfig(bytes configData);
-
-    /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
@@ -141,7 +68,7 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         /// @notice Tracks active collateral positions for the vault
         EnumerableSet.AddressSet depositedCollaterals;
     }
-    
+
     /* -------------------------------------------------------------------------- */
     /*                                  Constants                                 */
     /* -------------------------------------------------------------------------- */
@@ -192,26 +119,28 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         requireNotFrozen 
         requireSupportedCollateral(collateralAddress)
     {
+        if (amountCollateral == 0) {
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
+        }
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 collateralBalance = _getCollateralBalance(collateralAddress);
+        if (amountCollateral == type(uint256).max) {
+            amountCollateral = collateralBalance;
+        }
         if (collateralBalance < amountCollateral) {
-            if (amountCollateral == type(uint256).max) {
-                amountCollateral = collateralBalance;
-            } else {
-                revert VaultPlugin__InsufficientCollateral(
-                    address($.sfEngine), 
-                    collateralAddress, 
-                    collateralBalance, 
-                    amountCollateral
-                );
-            }
+            revert IVaultPlugin__InsufficientCollateral(
+                address($.sfEngine), 
+                collateralAddress, 
+                collateralBalance, 
+                amountCollateral
+            );
         }
         uint256 amountSFToMint = $.sfEngine.calculateSFTokensByCollateral(
             collateralAddress, 
             amountCollateral,
             $.customVaultConfig.collateralRatio
         );
-        emit VaultPlugin__Invest(collateralAddress, amountCollateral, amountSFToMint);
+        emit IVaultPlugin__Invest(collateralAddress, amountCollateral, amountSFToMint);
         IERC20(collateralAddress).approve(address($.sfEngine), amountCollateral);
         $.sfEngine.depositCollateralAndMintSFToken(collateralAddress, amountCollateral, amountSFToMint);
     }
@@ -228,12 +157,35 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         requireNotFrozen 
         requireSupportedCollateral(collateralAddress)
     {
+        if (amountCollateralToRedeem == 0) {
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
+        }
+        if (debtToRepay == 0) {
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
+        }
         VaultPluginStorage storage $ = _getVaultPluginStorage();
+        uint256 sfDebt = $.sfEngine.getSFDebt(address(this));
+        if (debtToRepay == type(uint256).max) {
+            debtToRepay = sfDebt;
+        }
+        if (debtToRepay > sfDebt) {
+            revert IVaultPlugin__DebtToRepayExceedsTotalDebt(debtToRepay, sfDebt);
+        }
         uint256 sfBalance = this.balance();
         if (debtToRepay > sfBalance) {
-            revert VaultPlugin__InsufficientBalance(address(0), sfBalance, debtToRepay);
+            revert IVaultPlugin__InsufficientBalance(address($.sfEngine), sfBalance, debtToRepay);
         }
-        emit VaultPlugin__Harvest(collateralAddress, amountCollateralToRedeem, debtToRepay);
+        uint256 collateralInvested = $.sfEngine.getCollateralAmount(address(this), collateralAddress);
+        if (collateralInvested < amountCollateralToRedeem && amountCollateralToRedeem < type(uint256).max) {
+            revert IVaultPlugin__InsufficientCollateral(
+                address($.sfEngine),
+                collateralAddress,
+                collateralInvested,
+                amountCollateralToRedeem
+            );
+        }
+        IERC20($.sfTokenAddress).approve(address($.sfEngine), debtToRepay);
+        emit IVaultPlugin__Harvest(collateralAddress, amountCollateralToRedeem, debtToRepay);
         $.sfEngine.redeemCollateral(collateralAddress, amountCollateralToRedeem, debtToRepay);
     }
 
@@ -252,11 +204,15 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 sfBalance = this.balance();
-        if (debtToCover > sfBalance) {
-            revert VaultPlugin__InsufficientBalance(address($.sfEngine), sfBalance, debtToCover);
+        uint256 allowance = debtToCover;
+        if (debtToCover == type(uint256).max) {
+            allowance = sfBalance;
         }
-        emit VaultPlugin__Liquidate(account, collateralAddress, debtToCover);
-        IERC20($.sfTokenAddress).approve(address($.sfEngine), debtToCover);
+        if (debtToCover > sfBalance) {
+            revert IVaultPlugin__InsufficientBalance(address($.sfEngine), sfBalance, debtToCover);
+        }
+        emit IVaultPlugin__Liquidate(account, collateralAddress, debtToCover);
+        IERC20($.sfTokenAddress).approve(address($.sfEngine), allowance);
         $.sfEngine.liquidate(account, collateralAddress, debtToCover);
     }
 
@@ -309,21 +265,21 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         requireSupportedCollateral(collateralAddress)
     {
         if (amount == 0) {
-            revert VaultPlugin__InvalidTokenAmount(amount);
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
         }
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         bool added = $.depositedCollaterals.add(collateralAddress);
         if (added) {
-            emit VaultPlugin__AddNewCollateral(collateralAddress);
+            emit IVaultPlugin__AddNewCollateral(collateralAddress);
         }
-        emit VaultPlugin__Deposit(collateralAddress, amount);
+        emit IVaultPlugin__Deposit(collateralAddress, amount);
         bool success = IERC20(collateralAddress).transferFrom(
             this.owner(), 
             address(this), 
             amount
         );
         if (!success) {
-            revert VaultPlugin__TransferFailed();
+            revert IVaultPlugin__TransferFailed();
         }
     }
 
@@ -331,43 +287,50 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     function withdraw(
         address collateralAddress, 
         uint256 amount
-    ) external override onlyEntryPoint requireNotFrozen {
+    ) 
+        external 
+        override 
+        onlyEntryPoint 
+        requireNotFrozen 
+        requireSupportedCollateral(collateralAddress)
+    {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if (collateralAddress == address(0)) {
-            revert VaultPlugin__InvalidTokenAddress(collateralAddress);
-        }
         if (amount == 0) {
-            revert VaultPlugin__InvalidTokenAmount(amount);
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
         }
-        uint256 collateralBalance = getCollateralBalance(collateralAddress);
+        uint256 collateralBalance = _getCollateralBalance(collateralAddress);
+        if (amount == type(uint256).max) {
+            amount = collateralBalance;
+        }
         if (amount > collateralBalance) {
-            if (amount == type(uint256).max) {
-                amount = getCollateralBalance(collateralAddress);
-            } else {
-                revert VaultPlugin__InsufficientCollateral(
-                    this.owner(), 
-                    collateralAddress, 
-                    collateralBalance, 
-                    amount
-                );
-            }
+            revert IVaultPlugin__InsufficientCollateral(
+                this.owner(), 
+                collateralAddress, 
+                collateralBalance, 
+                amount
+            );
         }
         if (amount == collateralBalance) {
             bool removed = $.depositedCollaterals.remove(collateralAddress);
             if (removed) {
-                emit VaultPlugin__RemoveCollateral(collateralAddress);
+                emit IVaultPlugin__RemoveCollateral(collateralAddress);
             }
         }
-        emit VaultPlugin__Withdraw(collateralAddress, amount);
+        emit IVaultPlugin__Withdraw(collateralAddress, amount);
         bool success = IERC20(collateralAddress).transfer(this.owner(), amount);
         if (!success) {
-            revert VaultPlugin__TransferFailed();
+            revert IVaultPlugin__TransferFailed();
         }
     }
 
     /// @inheritdoc IVaultPlugin
     function getCollateralBalance(address collateralAddress) public view override returns (uint256) {
         return _getCollateralBalance(collateralAddress);
+    }
+
+    /// @inheritdoc IVaultPlugin
+    function getCollateralInvested(address collateralAddress) external view override returns (uint256) {
+        return _getCollateralInvested(collateralAddress);
     }
 
     /// @inheritdoc IVaultPlugin
@@ -395,7 +358,7 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         ) = _checkCollateralSafety();
         upkeepNeeded = autoTopUpNeeded;
         if (danger) {
-            emit VaultPlugin__Danger(collateralRatio, liquidationThreshold);
+            emit IVaultPlugin__Danger(collateralRatio, liquidationThreshold);
         }
         return (upkeepNeeded, performData);
     }
@@ -439,14 +402,14 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 collateralBalance = _getCollateralBalance(collateralAddress);
         if (collateralBalance < amountCollateral) {
-            revert VaultPlugin__InsufficientCollateral(
+            revert IVaultPlugin__InsufficientCollateral(
                 address($.sfEngine), 
                 collateralAddress, 
                 collateralBalance, 
                 amountCollateral
             );
         }
-        emit VaultPlugin__TopUpCollateral(collateralAddress, amountCollateral);
+        emit IVaultPlugin__TopUpCollateral(collateralAddress, amountCollateral);
         IERC20(collateralAddress).approve(address($.sfEngine), amountCollateral);
         $.sfEngine.depositCollateralAndMintSFToken(collateralAddress, amountCollateral, 0);
     }
@@ -457,7 +420,7 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         uint256 currentCollateralInUsd = $.sfEngine.getTotalCollateralValueInUsd(address(this));
         uint256 requiredCollateralInUsd = sfDebt * targetCollateralRatio / PRECISION_FACTOR;
         if (currentCollateralInUsd >= requiredCollateralInUsd) {
-            revert VaultPlugin__TopUpNotNeeded(currentCollateralInUsd, requiredCollateralInUsd, targetCollateralRatio);
+            revert IVaultPlugin__TopUpNotNeeded(currentCollateralInUsd, requiredCollateralInUsd, targetCollateralRatio);
         }
         uint256 collateralToTopUpInUsd = requiredCollateralInUsd - currentCollateralInUsd;
         address[] memory collaterals = $.depositedCollaterals.values();
@@ -480,18 +443,23 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         }
         if (collateralToTopUpInUsd > 0) {
             uint256 currentCollateralRatio = requiredCollateralInUsd * PRECISION_FACTOR / sfDebt;
-            emit VaultPlugin__InsufficientCollateralForTopUp(
+            emit IVaultPlugin__InsufficientCollateralForTopUp(
                 collateralToTopUpInUsd,
                 currentCollateralRatio,
                 targetCollateralRatio
             );
         } else {
-            emit VaultPlugin__CollateralRatioMaintained(collateralToTopUpInUsd, targetCollateralRatio);
+            emit IVaultPlugin__CollateralRatioMaintained(collateralToTopUpInUsd, targetCollateralRatio);
         }
     }
 
     function _getCollateralBalance(address collateralAddress) private view returns (uint256) {
         return IERC20(collateralAddress).balanceOf(address(this));
+    }
+
+    function _getCollateralInvested(address collateralAddress) private view returns (uint256) {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        return $.sfEngine.getCollateralAmount(address(this), collateralAddress);
     }
 
     function _updateVaultConfig(VaultConfig memory vaultConfig) internal {
@@ -500,12 +468,15 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         $.vaultConfig = vaultConfig;
         bytes memory configBytes = abi.encode(vaultConfig);
-        emit VaultPlugin__UpdateVaultConfig(configBytes);
+        emit IVaultPlugin__UpdateVaultConfig(configBytes);
     }
 
     function _checkVaultConfig(VaultConfig memory vaultConfig) private pure {
+        if (vaultConfig.collaterals.length == 0 && vaultConfig.priceFeeds.length == 0) {
+            revert IVaultPlugin__CollateralsAndPriceFeedsCanNotBeEmpty();
+        }
         if (vaultConfig.collaterals.length != vaultConfig.priceFeeds.length) {
-            revert VaultPlugin__MismatchBetweenCollateralAndPriceFeeds(
+            revert IVaultPlugin__MismatchBetweenCollateralsAndPriceFeeds(
                 vaultConfig.collaterals.length, 
                 vaultConfig.priceFeeds.length
             );
@@ -516,9 +487,12 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         address[] memory collaterals, 
         address[] memory priceFeeds
     ) internal {
+        if (collaterals.length == 0 && priceFeeds.length == 0) {
+            revert IVaultPlugin__CollateralsAndPriceFeedsCanNotBeEmpty();
+        }
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         if (collaterals.length != priceFeeds.length) {
-            revert VaultPlugin__MismatchBetweenCollateralAndPriceFeeds(
+            revert IVaultPlugin__MismatchBetweenCollateralsAndPriceFeeds(
                 collaterals.length, 
                 priceFeeds.length
             );
@@ -527,7 +501,7 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         for (uint256 i = 0; i < collaterals.length; i++) {
             $.supportedCollaterals.set(collaterals[i], priceFeeds[i]);
         }
-        emit VaultPlugin__UpdateCollateralAndPriceFeed(collaterals.length);
+        emit IVaultPlugin__UpdateCollateralAndPriceFeed(collaterals.length);
     }
 
     function _updateCustomVaultConfig(CustomVaultConfig memory customConfig) private {
@@ -535,25 +509,24 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         $.customVaultConfig = customConfig;
         bytes memory configBytes = abi.encode(customConfig);
-        emit VaultPlugin__UpdateCustomVaultConfig(configBytes);
+        emit IVaultPlugin__UpdateCustomVaultConfig(configBytes);
     }
 
     function _checkCustomVaultConfig(CustomVaultConfig memory customConfig) private view {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 minCollateralRatio = $.sfEngine.getMinimumCollateralRatio();
-        if (customConfig.autoTopUpThreshold < minCollateralRatio) {
-            revert VaultPlugin__TopUpThresholdTooSmall(customConfig.autoTopUpThreshold, minCollateralRatio);
+        if (customConfig.autoTopUpEnabled && customConfig.autoTopUpThreshold < minCollateralRatio) {
+            revert IVaultPlugin__TopUpThresholdTooSmall(customConfig.autoTopUpThreshold, minCollateralRatio);
         }
         if (customConfig.collateralRatio < minCollateralRatio) {
-            revert VaultPlugin__CustomCollateralRatioTooSmall(customConfig.collateralRatio, minCollateralRatio);
+            revert IVaultPlugin__CustomCollateralRatioTooSmall(customConfig.collateralRatio, minCollateralRatio);
         }
     }
 
     function _requireSupportedCollateral(address collateral) private view {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         if (!$.supportedCollaterals.contains(collateral)) {
-            revert VaultPlugin__CollateralNotSupported(collateral);
+            revert IVaultPlugin__CollateralNotSupported(collateral);
         }
     }
-
 }

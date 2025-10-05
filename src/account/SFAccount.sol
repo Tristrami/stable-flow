@@ -37,23 +37,6 @@ import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/acce
 contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
 
     /* -------------------------------------------------------------------------- */
-    /*                                   Errors                                   */
-    /* -------------------------------------------------------------------------- */
-
-    error SFAccount__NotFromFactory();
-    error SFAccount__OperationNotSupported();
-    error SFAccount__InvalidAddress();
-    error SFAccount__InvalidTokenAmount();
-    error SFAccount__ApproveFailed();
-    error SFAccount__TransferFailed();
-
-    /* -------------------------------------------------------------------------- */
-    /*                                   Events                                   */
-    /* -------------------------------------------------------------------------- */
-
-    event SFAccount__AccountCreated(address indexed owner);
-
-    /* -------------------------------------------------------------------------- */
     /*                               State Variables                              */
     /* -------------------------------------------------------------------------- */
 
@@ -128,7 +111,7 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
 
     /// @inheritdoc ISFAccount
     function createAccount() external override {
-        emit SFAccount__AccountCreated(owner());
+        emit ISFAccount__AccountCreated(owner());
     }
 
     /// @inheritdoc ISFAccount
@@ -154,26 +137,33 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
         requireNotFrozen 
         onlySFAccount(to) 
     {
-        if (to == address(0)) {
-            revert SFAccount__InvalidAddress();
-        }
         if (amount == 0) {
-            revert SFAccount__InvalidTokenAmount();
+            revert ISFAccount__TokenAmountCanNotBeZero();
+        }
+        uint256 sfTokenBalance = _getSFTokenBalance();
+        if (sfTokenBalance == 0) {
+            revert ISFAccount__InsufficientBalance(to, sfTokenBalance, amount);
+        }
+        if (amount == type(uint256).max) {
+            amount = sfTokenBalance;
+        }
+        if (amount > sfTokenBalance) {
+            revert ISFAccount__InsufficientBalance(to, sfTokenBalance, amount);
         }
         bool success = IERC20(sfTokenAddress).transfer(to, amount);
         if (!success) {
-            revert SFAccount__TransferFailed();
+            revert ISFAccount__TransferFailed();
         }
     }
 
     /// @inheritdoc BaseAccount
     function execute(address /* target */, uint256 /* value */, bytes calldata /* data */) external pure override {
-        revert SFAccount__OperationNotSupported();
+        revert ISFAccount__OperationNotSupported();
     }
 
     /// @inheritdoc BaseAccount
     function executeBatch(Call[] calldata /* calls */) external pure override {
-        revert SFAccount__OperationNotSupported();
+        revert ISFAccount__OperationNotSupported();
     }
 
     /// @inheritdoc BaseAccount

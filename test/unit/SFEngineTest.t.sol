@@ -2,6 +2,7 @@
 pragma solidity ^0.8.30;
 
 import {Test, Vm, console2} from "forge-std/Test.sol";
+import {ISFEngine} from "../../src/interfaces/ISFEngine.sol";
 import {SFEngine} from "../../src/token/SFEngine.sol";
 import {SFToken} from "../../src/token/SFToken.sol";
 import {Deploy} from "../../script/Deploy.s.sol";
@@ -10,6 +11,7 @@ import {DeployHelper} from "../../script/util/DeployHelper.sol";
 import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
+import {Logs} from "../../script/util/Logs.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolDataProvider} from "aave-address-book/src/AaveV3.sol";
 import {IPool} from "@aave/contracts/interfaces/IPool.sol";
@@ -19,6 +21,7 @@ contract SFEngineTest is Test, Constants {
 
     using Precisions for uint256;
     using OracleLib for AggregatorV3Interface;
+    using Logs for Vm;
 
     struct TestData {
         uint256 forkId;
@@ -41,15 +44,15 @@ contract SFEngineTest is Test, Constants {
     address[] private tokenAddresses;
     address[] private priceFeedAddresses;
 
-    event SFEngine__CollateralDeposited(
+    event ISFEngine__CollateralDeposited(
         address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
-    event SFEngine__CollateralRedeemed(
+    event ISFEngine__CollateralRedeemed(
         address indexed user, address indexed collateralAddress, uint256 indexed amountCollateral
     );
-    event SFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
-    event SFEngine__UpdateInvestmentRatio(uint256 investmentRatio);
-    event SFEngine__Harvest(address indexed asset, uint256 indexed amount, uint256 indexed interest);
+    event ISFEngine__SFTokenMinted(address indexed user, uint256 indexed amountToken);
+    event ISFEngine__UpdateInvestmentRatio(uint256 investmentRatio);
+    event ISFEngine__Harvest(address indexed asset, uint256 indexed amount, uint256 indexed interest);
 
     modifier depositedCollateral(TestData storage data, address collateralAddress, uint256 collateralRatio) {
         IERC20 collateral = IERC20(collateralAddress);
@@ -193,26 +196,26 @@ contract SFEngineTest is Test, Constants {
         tokenAddresses = [address(0)];
         priceFeedAddresses = [address(0), address(1)];
         SFEngine engine = new SFEngine();
-        vm.expectRevert(SFEngine.SFEngine__TokenAddressAndPriceFeedLengthNotMatch.selector);
+        vm.expectRevert(ISFEngine.ISFEngine__TokenAddressAndPriceFeedLengthNotMatch.selector);
         engine.initialize(address(token), address(0), 0, 0, 0, tokenAddresses, priceFeedAddresses);
         // Token address length > price feed address length
         tokenAddresses = [address(0), address(1)];
         priceFeedAddresses = [address(0)];
         engine = new SFEngine();
-        vm.expectRevert(SFEngine.SFEngine__TokenAddressAndPriceFeedLengthNotMatch.selector);
+        vm.expectRevert(ISFEngine.ISFEngine__TokenAddressAndPriceFeedLengthNotMatch.selector);
         engine.initialize(address(token), address(0), 0, 0, 0, tokenAddresses, priceFeedAddresses);
     }
 
     function test_RevertWhen_DepositCollateralParamIsInvalid() public localTest {
         // Zero address
-        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__CollateralNotSupported.selector, address(0)));
+        vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__CollateralNotSupported.selector, address(0)));
         $.sfEngine.depositCollateralAndMintSFToken(address(0), 1 ether, 1 ether);
         // Zero amount of collateral
-        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__AmountCollateralToDepositCanNotBeZero.selector, 0));
+        vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__AmountCollateralToDepositCanNotBeZero.selector, 0));
         $.sfEngine.depositCollateralAndMintSFToken($.deployConfig.wethTokenAddress, 0 ether, 1 ether);
         // Unsupported token
         ERC20Mock token = new ERC20Mock("TEST", "TEST", msg.sender, 10);
-        vm.expectRevert(abi.encodeWithSelector(SFEngine.SFEngine__CollateralNotSupported.selector, address(token)));
+        vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__CollateralNotSupported.selector, address(token)));
         $.sfEngine.depositCollateralAndMintSFToken(address(token), 1 ether, 1 ether);
     }
 
@@ -227,7 +230,7 @@ contract SFEngineTest is Test, Constants {
         vm.startPrank(user);
         weth.approve(address($.sfEngine), amountCollateral);
         vm.expectRevert(
-            abi.encodeWithSelector(SFEngine.SFEngine__CollateralRatioIsBroken.selector, user, collateralRatio)
+            abi.encodeWithSelector(ISFEngine.ISFEngine__CollateralRatioIsBroken.selector, user, collateralRatio)
         );
         $.sfEngine.depositCollateralAndMintSFToken(address(weth), amountCollateral, amountToMint);
     }
@@ -250,9 +253,9 @@ contract SFEngineTest is Test, Constants {
         uint256 startingUserSFBalance = $.sfToken.balanceOf(user);
         // Expected events
         vm.expectEmit(true, true, true, false);
-        emit SFEngine__CollateralDeposited(user, address(weth), amountCollateral);
+        emit ISFEngine__CollateralDeposited(user, address(weth), amountCollateral);
         vm.expectEmit(true, true, true, false);
-        emit SFEngine__SFTokenMinted(user, amountToMint);
+        emit ISFEngine__SFTokenMinted(user, amountToMint);
         // Act
         $.sfEngine.depositCollateralAndMintSFToken(address(weth), amountCollateral, amountToMint);
         // Assert
@@ -280,15 +283,20 @@ contract SFEngineTest is Test, Constants {
     {
         vm.startPrank(user);
         uint256 amountDeposited = $.sfEngine.getCollateralAmount(user, $.deployConfig.wethTokenAddress);
+        // Keep 1 SF
         uint256 amountToBurn = $.sfEngine.calculateSFTokensByCollateral(
             $.deployConfig.wethTokenAddress, 
             amountDeposited, 
             DEFAULT_COLLATERAL_RATIO
-        );
+        ) - 1 * PRECISION_FACTOR;
         uint256 amountToRedeem = amountDeposited + 1 ether;
         $.sfToken.approve(address($.sfEngine), amountToBurn);
         vm.expectRevert(
-            abi.encodeWithSelector(SFEngine.SFEngine__AmountToRedeemExceedsDeposited.selector, amountDeposited)
+            abi.encodeWithSelector(
+                ISFEngine.ISFEngine__AmountToRedeemExceedsDeposited.selector, 
+                amountToRedeem,
+                amountDeposited
+            )
         );
         $.sfEngine.redeemCollateral(
             $.deployConfig.wethTokenAddress, amountToRedeem, amountToBurn
@@ -305,11 +313,26 @@ contract SFEngineTest is Test, Constants {
         $.sfToken.burn(user, $.sfToken.balanceOf(user));
         vm.stopPrank();
         // Try to redeem, expect to revert
-        vm.startPrank(user);
         vm.expectRevert(
-            abi.encodeWithSelector(SFEngine.SFEngine__InsufficientBalance.selector, $.sfToken.balanceOf(user))
+            abi.encodeWithSelector(ISFEngine.ISFEngine__InsufficientBalance.selector, $.sfToken.balanceOf(user))
         );
+        vm.prank(user);
         $.sfEngine.redeemCollateral($.deployConfig.wethTokenAddress, DEFAULT_AMOUNT_COLLATERAL, INITIAL_BALANCE);
+    }
+
+    function test_RevertWhen_DebtToCoverExceedsUserDebt() 
+        public 
+        ethSepoliaTest
+        depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
+    {
+        uint256 sfBalance = $.sfToken.balanceOf(user);
+        uint256 sfToBurn = sfBalance + 1 * PRECISION_FACTOR;
+        // Mint some sf to user to make sure the sf balance is enough
+        vm.prank($.sfToken.owner());
+        $.sfToken.mint(user, 1 * PRECISION_FACTOR);
+        vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__DebtToCoverExceedsUserDebt.selector, sfToBurn, sfBalance));
+        vm.prank(user);
+        $.sfEngine.redeemCollateral($.deployConfig.wethTokenAddress, 0, sfToBurn);
     }
 
     function test_RevertWhen_RedeemBreaksCollateralRatio() 
@@ -347,7 +370,7 @@ contract SFEngineTest is Test, Constants {
         $.sfToken.approve(address($.sfEngine), amountSFToBurn);
         vm.expectRevert(
             abi.encodeWithSelector(
-                SFEngine.SFEngine__CollateralRatioIsBroken.selector, user, expectedCollateralRatioAfterRedeem
+                ISFEngine.ISFEngine__CollateralRatioIsBroken.selector, user, expectedCollateralRatioAfterRedeem
             )
         );
         $.sfEngine.redeemCollateral($.deployConfig.wethTokenAddress, amountCollateralToRedeem, amountSFToBurn);
@@ -454,7 +477,7 @@ contract SFEngineTest is Test, Constants {
 
         // Redeem
         $.sfEngine.redeemCollateral(
-            $.deployConfig.wethTokenAddress, amountCollateralToRedeem, sfToBurn
+            $.deployConfig.wethTokenAddress, type(uint256).max, type(uint256).max
         );
 
         // Ending balance
@@ -493,10 +516,33 @@ contract SFEngineTest is Test, Constants {
         // Liquidate user's collateral, this will revert no matter how much debt we are going to cover
         vm.expectRevert(
             abi.encodeWithSelector(
-                SFEngine.SFEngine__CollateralRatioIsNotBroken.selector, user, $.sfEngine.getCollateralRatio(user)
+                ISFEngine.ISFEngine__CollateralRatioIsNotBroken.selector, user, $.sfEngine.getCollateralRatio(user)
             )
         );
         $.sfEngine.liquidate(user, $.deployConfig.wethTokenAddress, 1000 ether);
+    }
+
+    function test_RevertWhen_DebtToCoverExceedsLiquidatorBalance()
+        public 
+        ethSepoliaTest
+        depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
+    {
+        uint256 userDebt = $.sfEngine.getSFDebt(user);
+        // The liquidator has no sf token
+        address liquidator = makeAddr("liquidator");
+        // Break user's collateral ratio
+        MockV3Aggregator wethPriceFeed = MockV3Aggregator($.deployConfig.wethPriceFeedAddress);
+        wethPriceFeed.updateAnswer(int256(1900 * (10 ** PRICE_FEED_DECIMALS)));
+        vm.startPrank(liquidator);
+        $.sfToken.approve(address($.sfEngine), INITIAL_BALANCE);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ISFEngine.ISFEngine__InsufficientBalance.selector, 
+                $.sfToken.balanceOf(liquidator)
+            )
+        );
+        $.sfEngine.liquidate(user, $.deployConfig.wethTokenAddress, userDebt);
+        vm.stopPrank();
     }
 
     function test_LiquidateWhen_DebtToCoverLessThanUserCollateral() 
@@ -660,10 +706,11 @@ contract SFEngineTest is Test, Constants {
 
         vm.roll(block.number + 10000);
         vm.warp(block.timestamp + 365 days);
-        vm.recordLogs();
+        
         vm.prank($.sfEngine.owner());
         vm.expectEmit(true, false, false, false);
-        emit SFEngine.SFEngine__Harvest(asset, 0, 0);
+        emit ISFEngine.ISFEngine__Harvest(asset, 0, 0);
+        vm.recordLogs();
         $.sfEngine.harvest(asset, type(uint256).max);
         
         uint256 endingEngineCollateralBalance = IERC20(asset).balanceOf(address($.sfEngine));
@@ -672,15 +719,13 @@ contract SFEngineTest is Test, Constants {
         (uint256 endingATokenBalance, , , , , , , , ) = IPoolDataProvider(
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(asset, address($.sfEngine)); 
+
         uint256 amountWithdrawn;
         uint256 interest;
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("SFEngine__Harvest(address,uint256,uint256)")) {
-                amountWithdrawn = uint256(logs[i].topics[2]);
-                interest = uint256(logs[i].topics[3]);
-            }
-        }
+        Vm.Log memory log = vm.findRecordedLog("ISFEngine__Harvest(address,uint256,uint256)");
+        amountWithdrawn = uint256(log.topics[2]);
+        interest = uint256(log.topics[3]);
+
         assertEq(amountWithdrawn - interest, amountInvested);
         assertEq(endingEngineCollateralBalance, startingEngineCollateralBalance + amountWithdrawn);
         assertEq(endingUserCollateralAmount, startingUserCollateralAmount);
@@ -741,17 +786,15 @@ contract SFEngineTest is Test, Constants {
         uint256 wethInterest;
         uint256 wbtcAmountWithdrawn;
         uint256 wbtcInterest;
-        Vm.Log[] memory logs = vm.getRecordedLogs();
+        Vm.Log[] memory logs = vm.findRecordedLogs("ISFEngine__Harvest(address,uint256,uint256)");
         for (uint256 i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("SFEngine__Harvest(address,uint256,uint256)")) {
-                address asset = address(uint160(uint256(logs[i].topics[1])));
-                if (asset == weth) {
-                    wethAmountWithdrawn = uint256(logs[i].topics[2]);
-                    wethInterest = uint256(logs[i].topics[3]);
-                } else if (asset == wbtc) {
-                    wbtcAmountWithdrawn = uint256(logs[i].topics[2]);
-                    wbtcInterest = uint256(logs[i].topics[3]);
-                }
+            address asset = address(uint160(uint256(logs[i].topics[1])));
+            if (asset == weth) {
+                wethAmountWithdrawn = uint256(logs[i].topics[2]);
+                wethInterest = uint256(logs[i].topics[3]);
+            } else if (asset == wbtc) {
+                wbtcAmountWithdrawn = uint256(logs[i].topics[2]);
+                wbtcInterest = uint256(logs[i].topics[3]);
             }
         }
 

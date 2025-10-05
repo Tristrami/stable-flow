@@ -26,45 +26,6 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     /* -------------------------------------------------------------------------- */
-    /*                                   Errors                                   */
-    /* -------------------------------------------------------------------------- */
-
-    error SocialRecoveryPlugin__SocialRecoveryNotSupported();
-    error SocialRecoveryPlugin__SocialRecoveryIsAlreadyDisabled();
-    error SocialRecoveryPlugin__SocialRecoveryIsAlreadyEnabled();
-    error SocialRecoveryPlugin__ApprovalExceedsGuardianAmount(uint256 approvals, uint256 numGuardians);
-    error SocialRecoveryPlugin__AccountIsInRecoveryProcess();
-    error SocialRecoveryPlugin__NoGuardianSet();
-    error SocialRecoveryPlugin__MinGuardianApprovalsCanNotBeZero();
-    error SocialRecoveryPlugin__MaxGuardiansCanNotBeZero();
-    error SocialRecoveryPlugin__OnlyGuardian();
-    error SocialRecoveryPlugin__AlreadyApproved();
-    error SocialRecoveryPlugin__TooManyGuardians(uint256 maxGuardians);
-    error SocialRecoveryPlugin__GuardianAlreadyExists(address guardian);
-    error SocialRecoveryPlugin__GuardianNotExists(address guardian);
-    error SocialRecoveryPlugin__NotSFAccount(address account);
-    error SocialRecoveryPlugin__NotInRecoveryProcess();
-    error SocialRecoveryPlugin__InsufficientApprovals(uint256 currentApprovals, uint256 requiredApprovals);
-    error SocialRecoveryPlugin__RecoveryNotExecutable(uint256 executableTime);
-    error SocialRecoveryPlugin__RecoveryAlreadyInitiated(address newOwner);
-
-    /* -------------------------------------------------------------------------- */
-    /*                                   Events                                   */
-    /* -------------------------------------------------------------------------- */
-
-    event SocialRecoveryPlugin__UpdateRecoveryConfig(bytes configData);
-    event SocialRecoveryPlugin__UpdateCustomRecoveryConfig(bytes configData);
-    event SocialRecoveryPlugin__UpdateGuardians(uint256 numGuardians);
-    event SocialRecoveryPlugin__RecoveryInitiated(address indexed newOwner);
-    event SocialRecoveryPlugin__RecoveryApproved(address indexed guardian);
-    event SocialRecoveryPlugin__RecoveryCancelled(address indexed guardian, bytes recordData);
-    event SocialRecoveryPlugin__RecoveryCompleted(
-        address indexed previousOwner, 
-        address indexed newOwner, 
-        bytes recordData
-    );
-
-    /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
@@ -107,8 +68,9 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     /* -------------------------------------------------------------------------- */
 
     modifier onlyGuardian() {
-        if (!hasRole(GUARDIAN_ROLE, _msgSender())) {
-            revert SocialRecoveryPlugin__OnlyGuardian();
+        SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
+        if (!hasRole(GUARDIAN_ROLE, _msgSender()) || !$.guardians.contains(_msgSender())) {
+            revert ISocialRecoveryPlugin__OnlyGuardian();
         }
         _;
     }
@@ -199,12 +161,13 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
             previousOwner: this.owner(),
             newOwner: newOwner,
             totalGuardians: $.guardians.length(),
+            requiredApprovals: $.customRecoveryConfig.minGuardianApprovals,
             approvedGuardians: new address[](0),
-            executableTime: block.timestamp + $.customRecoveryConfig.recoveryTimeLock
+            executableTime: 0
         });
         $.recoveryRecords.push(recoveryRecord);
         _freezeAccount(msg.sender);
-        emit SocialRecoveryPlugin__RecoveryInitiated(newOwner);
+        emit ISocialRecoveryPlugin__RecoveryInitiated(msg.sender, newOwner);
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -225,12 +188,15 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         address[] storage approvedGuardians = recoveryRecord.approvedGuardians;
         for (uint256 i = 0; i < approvedGuardians.length; i++) {
             if (approvedGuardians[i] == msg.sender) {
-                revert SocialRecoveryPlugin__AlreadyApproved();
+                revert ISocialRecoveryPlugin__AlreadyApproved();
             }
         }
         approvedGuardians.push(msg.sender);
-        emit SocialRecoveryPlugin__RecoveryApproved(msg.sender);
-        bool approvalIsSufficient = recoveryRecord.approvedGuardians.length >= $.customRecoveryConfig.minGuardianApprovals;
+        emit ISocialRecoveryPlugin__RecoveryApproved(msg.sender);
+        bool approvalIsSufficient = recoveryRecord.approvedGuardians.length >= recoveryRecord.requiredApprovals;
+        if (approvalIsSufficient) {
+            recoveryRecord.executableTime = block.timestamp + $.customRecoveryConfig.recoveryTimeLock;
+        }
         bool executableTimeReached = block.timestamp >= recoveryRecord.executableTime;
         if (approvalIsSufficient && executableTimeReached) {
             _completeRecovery(msg.sender);
@@ -254,7 +220,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         recoveryRecord.isCancelled = true;
         recoveryRecord.cancelledBy = msg.sender;
         _unfreezeAccount(msg.sender);
-        emit SocialRecoveryPlugin__RecoveryCancelled(msg.sender, abi.encode(recoveryRecord));
+        emit ISocialRecoveryPlugin__RecoveryCancelled(msg.sender, abi.encode(recoveryRecord));
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -271,6 +237,12 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     /// @inheritdoc ISocialRecoveryPlugin
     function receiveCompleteRecovery() external override onlyGuardian recoverable {
         _completeRecovery(msg.sender);
+    }
+
+    /// @inheritdoc ISocialRecoveryPlugin
+    function getRecoveryRecords() external view override returns (RecoveryRecord[] memory) {
+        SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
+        return $.recoveryRecords;
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
@@ -304,6 +276,11 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         return $.guardians.contains(account);
     }
 
+    /// @inheritdoc ISocialRecoveryPlugin
+    function isRecovering() external view override returns (bool) {
+        return _existsPendingRecovery();
+    }
+
     /* -------------------------------------------------------------------------- */
     /*                        Internal / Private Functions                        */
     /* -------------------------------------------------------------------------- */
@@ -318,23 +295,27 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         _checkSocialRecoveryConfig(recoveryConfig);
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         $.recoveryConfig = recoveryConfig;
-        emit SocialRecoveryPlugin__UpdateRecoveryConfig(abi.encode(recoveryConfig));
+        emit ISocialRecoveryPlugin__UpdateRecoveryConfig(abi.encode(recoveryConfig));
     }
 
     function _checkSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) private pure {
         if (recoveryConfig.maxGuardians == 0) {
-            revert SocialRecoveryPlugin__MaxGuardiansCanNotBeZero();
+            revert ISocialRecoveryPlugin__MaxGuardiansCanNotBeZero();
         }
     }
 
     function _updateCustomSocialRecoveryConfig(CustomRecoveryConfig memory customConfig) internal {
+        _checkCustomSocialRecoveryConfig(customConfig);
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         _updateGuardians(customConfig.guardians);
         $.customRecoveryConfig = customConfig;
-        emit SocialRecoveryPlugin__UpdateCustomRecoveryConfig(abi.encode(customConfig));
+        emit ISocialRecoveryPlugin__UpdateCustomRecoveryConfig(abi.encode(customConfig));
     }
 
     function _checkCustomSocialRecoveryConfig(CustomRecoveryConfig memory customConfig) private view {
+        if (!customConfig.socialRecoveryEnabled) {
+            return;
+        }
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if ($.customRecoveryConfig.socialRecoveryEnabled 
             && !customConfig.socialRecoveryEnabled) {
@@ -342,13 +323,13 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
             _requireNotRecovering();
         }
         if (customConfig.minGuardianApprovals == 0) {
-            revert SocialRecoveryPlugin__MinGuardianApprovalsCanNotBeZero();
+            revert ISocialRecoveryPlugin__MinGuardianApprovalsCanNotBeZero();
         }
         if (customConfig.guardians.length == 0) {
-            revert SocialRecoveryPlugin__NoGuardianSet();
+            revert ISocialRecoveryPlugin__NoGuardianSet();
         }
         if (customConfig.minGuardianApprovals > customConfig.guardians.length) {
-            revert SocialRecoveryPlugin__ApprovalExceedsGuardianAmount(
+            revert ISocialRecoveryPlugin__ApprovalExceedsGuardianAmount(
                 customConfig.minGuardianApprovals, 
                 customConfig.guardians.length
             );
@@ -356,22 +337,26 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     }
 
     function _updateGuardians(address[] memory guardians) private {
+        if (guardians.length == 0) {
+            return;
+        }
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         $.guardians.clear();
         for (uint256 i = 0; i < guardians.length; i++) {
+            _grantRole(GUARDIAN_ROLE, guardians[i]);
             $.guardians.add(guardians[i]);
         }
-        emit SocialRecoveryPlugin__UpdateGuardians(guardians.length);
+        emit ISocialRecoveryPlugin__UpdateGuardians(guardians.length);
     }
 
     function _getPendingRecovery() private view returns (RecoveryRecord storage) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if ($.recoveryRecords.length == 0) {
-            revert SocialRecoveryPlugin__NotInRecoveryProcess();
+            revert ISocialRecoveryPlugin__NotInRecoveryProcess();
         }
         RecoveryRecord storage latestRecord = $.recoveryRecords[$.recoveryRecords.length - 1];
         if (latestRecord.isCompleted || latestRecord.isCancelled) {
-            revert SocialRecoveryPlugin__NotInRecoveryProcess();
+            revert ISocialRecoveryPlugin__NotInRecoveryProcess();
         }
         return latestRecord;
     }
@@ -388,20 +373,20 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     }
 
     function _completeRecovery(address completedBy) private {
-        SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         uint256 currentApprovals = recoveryRecord.approvedGuardians.length;
-        uint256 minApprovals = $.customRecoveryConfig.minGuardianApprovals;
-        if (currentApprovals < minApprovals) {
-            revert SocialRecoveryPlugin__InsufficientApprovals(currentApprovals, minApprovals);
+        uint256 requiredApprovals = recoveryRecord.requiredApprovals;
+        if (currentApprovals < requiredApprovals) {
+            revert ISocialRecoveryPlugin__InsufficientApprovals(currentApprovals, requiredApprovals);
         }
         if (block.timestamp < recoveryRecord.executableTime) {
-            revert SocialRecoveryPlugin__RecoveryNotExecutable(recoveryRecord.executableTime);
+            revert ISocialRecoveryPlugin__RecoveryNotExecutable(recoveryRecord.executableTime);
         }
         recoveryRecord.isCompleted = true;
         recoveryRecord.completedBy = completedBy;
+        _unfreezeAccount(completedBy);
         _transferOwnership(recoveryRecord.newOwner);
-        emit SocialRecoveryPlugin__RecoveryCompleted(
+        emit ISocialRecoveryPlugin__RecoveryCompleted(
             recoveryRecord.previousOwner, 
             recoveryRecord.newOwner,
             abi.encode(recoveryRecord)
@@ -415,7 +400,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
 
     function _requireNotRecovering() private view {
         if (_existsPendingRecovery()) {
-            revert SocialRecoveryPlugin__AccountIsInRecoveryProcess();
+            revert ISocialRecoveryPlugin__AccountIsInRecoveryProcess();
         }
     }
 
@@ -430,14 +415,14 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
 
     function _requireSupportsSocialRecovery() private view {
         if (!_supportsSocialRecovery()) {
-            revert SocialRecoveryPlugin__SocialRecoveryNotSupported();
+            revert ISocialRecoveryPlugin__SocialRecoveryNotSupported();
         }
     }
 
     function _requireSupportsSocialRecovery(address account) private view {
         _requireSFAccount(account);
         if (!ISocialRecoveryPlugin(account).supportsSocialRecovery()) {
-            revert SocialRecoveryPlugin__SocialRecoveryNotSupported();
+            revert ISocialRecoveryPlugin__SocialRecoveryNotSupported();
         }
     }
 }

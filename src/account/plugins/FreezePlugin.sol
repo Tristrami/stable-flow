@@ -19,39 +19,8 @@ import {BaseSFAccountPlugin} from "./BaseSFAccountPlugin.sol";
 abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
 
     /* -------------------------------------------------------------------------- */
-    /*                                   Errors                                   */
-    /* -------------------------------------------------------------------------- */
-
-    error FreezePlugin__AccountIsFrozen();
-    error FreezePlugin__AccountIsNotFrozen();
-
-    /* -------------------------------------------------------------------------- */
-    /*                                   Events                                   */
-    /* -------------------------------------------------------------------------- */
-
-    event FreezePlugin__FreezeAccount(address indexed frozenBy);
-    event FreezePlugin__UnfreezeAccount(address indexed unfrozenBy);
-
-    /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
-
-    /**
-     * @dev Record tracking account freeze/unfreeze events
-     * @notice Used for security auditing and account state history tracking
-     * @notice Maintains complete lifecycle of each freeze operation
-     */
-    struct FreezeRecord {
-        /// @dev Address that initiated the freeze operation
-        /// @notice Typically the EntryPoint or guardians
-        address frozenBy;
-        /// @dev Address that executed unfreeze operation
-        /// @notice Zero address (0x0) indicates still frozen state
-        address unfrozenBy;
-        /// @dev Current state flag for this freeze record
-        /// @notice true = unfrozen, false = currently frozen
-        bool isUnfozen;
-    }
 
     struct FreezePluginStorage {
         /// @dev Account frozen status flag
@@ -133,16 +102,17 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
             isUnfozen: false
         });
         $.freezeRecords.push(freezeRecord);
-        emit FreezePlugin__FreezeAccount(frozenBy);
+        emit IFreezePlugin__FreezeAccount(frozenBy);
     }
 
     function _unfreezeAccount(address unfrozenBy) internal {
         _requireFrozen();
         FreezePluginStorage storage $ = _getFreezePluginStorage();
+        $.frozen = false;
         FreezeRecord storage freezeRecord = $.freezeRecords[$.freezeRecords.length - 1];
         freezeRecord.isUnfozen = true;
         freezeRecord.unfrozenBy = unfrozenBy;
-        emit FreezePlugin__UnfreezeAccount(unfrozenBy);
+        emit IFreezePlugin__UnfreezeAccount(unfrozenBy);
     }
 
     function _isFrozen() internal view returns (bool) {
@@ -152,13 +122,13 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
 
     function _requireFrozen() internal view {
         if (!this.isFrozen()) {
-            revert FreezePlugin__AccountIsNotFrozen();
+            revert IFreezePlugin__AccountIsNotFrozen();
         }
     }
 
     function _requireNotFrozen() internal view {
         if (this.isFrozen()) {
-            revert FreezePlugin__AccountIsFrozen();
+            revert IFreezePlugin__AccountIsFrozen();
         }
     }
 }

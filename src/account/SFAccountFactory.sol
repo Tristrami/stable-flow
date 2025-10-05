@@ -20,7 +20,7 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
     using ERC165Checker for address;
 
     error SFAccountFactory__OnlyOwner();
-    error SFAccountFactory__MaxUserAccountCanNotBeZero();
+    error SFAccountFactory__MaxAccountAmountCanNotBeZero();
     error SFAccountFactory__IncompatibleImplementation();
     error SFAccountFactory__NotFromEntryPoint();
     error SFAccountFactory__AccountLimitReached(uint256 limit);
@@ -33,14 +33,14 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
     address private beaconAddress;
     IVaultPlugin.VaultConfig private vaultConfig;
     ISocialRecoveryPlugin.RecoveryConfig private recoveryConfig;
-    uint256 private maxUserAccount;
+    uint256 private maxAccountAmount;
     mapping(address user => address[] sfAccounts) private userAccounts;
 
     function initialize(
         address _entryPointAddress,
         address _sfEngineAddress,
         address _beaconAddress,
-        uint256 _maxUserAccount,
+        uint256 _maxAccountAmount,
         IVaultPlugin.VaultConfig memory _vaultConfig,
         ISocialRecoveryPlugin.RecoveryConfig memory _recoveryConfig
     ) external initializer {
@@ -51,22 +51,22 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
         beaconAddress = _beaconAddress;
         vaultConfig = _vaultConfig;
         recoveryConfig = _recoveryConfig;
-        if (_maxUserAccount == 0) {
-            revert SFAccountFactory__MaxUserAccountCanNotBeZero();
+        if (_maxAccountAmount == 0) {
+            revert SFAccountFactory__MaxAccountAmountCanNotBeZero();
         }
-        maxUserAccount = _maxUserAccount;
+        maxAccountAmount = _maxAccountAmount;
     }
 
     function reinitialize(
         uint64 _version,
-        uint256 _maxUserAccount,
+        uint256 _maxAccountAmount,
         IVaultPlugin.VaultConfig memory _vaultConfig,
         ISocialRecoveryPlugin.RecoveryConfig memory _recoveryConfig
     ) external reinitializer(_version) {
         vaultConfig = _vaultConfig;
         recoveryConfig = _recoveryConfig;
-        if (_maxUserAccount == 0) {
-            revert SFAccountFactory__MaxUserAccountCanNotBeZero();
+        if (_maxAccountAmount == 0) {
+            revert SFAccountFactory__MaxAccountAmountCanNotBeZero();
         }
     }
 
@@ -77,8 +77,8 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
         ISocialRecoveryPlugin.CustomRecoveryConfig memory customRecoveryConfig
     ) external returns (address) {
         address[] memory sfAccounts = userAccounts[accountOwner];
-        if (sfAccounts.length == maxUserAccount) {
-            revert SFAccountFactory__AccountLimitReached(maxUserAccount);
+        if (sfAccounts.length == maxAccountAmount) {
+            revert SFAccountFactory__AccountLimitReached(maxAccountAmount);
         }
         address accountProxyAddress = _deployBeaconProxy(salt);
         userAccounts[accountOwner].push(accountProxyAddress);
@@ -125,6 +125,35 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
             )
         );
         return abi.encodePacked(address(this), initCallData);
+    }
+
+    function getSFAccountSalt(address user) public view returns (bytes32) {
+        return keccak256(abi.encode(user, getSFAccountAmount(user)));
+    }
+
+    function getSFAccountAmount(address user) public view returns (uint256) {
+        return userAccounts[user].length;
+    }
+
+    function getMaxAccountAmount() public view returns (uint256) {
+        return maxAccountAmount;
+    }
+
+    function calculateAccountAddress(
+        address beacon,
+        bytes32 salt
+    ) public view returns (address) {
+        bytes memory byteCode = abi.encodePacked(
+            type(BeaconProxy).creationCode, 
+            abi.encode(beacon, "")
+        );
+        bytes32 hash = keccak256(abi.encodePacked(
+            bytes1(0xff),
+            address(this),
+            salt,
+            keccak256(byteCode)
+        ));
+        return address(uint160(uint256(hash)));
     }
 
     function _deployBeaconProxy(bytes32 salt) private returns (address) {
