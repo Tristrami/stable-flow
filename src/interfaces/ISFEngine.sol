@@ -14,12 +14,12 @@ interface ISFEngine {
     /**
      * @dev Reverts when zero address is provided as user address
      */
-    error ISFEngine__InvalidUserAddress();
+    error ISFEngine__UserAddressCanNotBeZero();
 
     /**
      * @dev Reverts when zero address is provided as collateral address
      */
-    error ISFEngine__InvalidCollateralAddress();
+    error ISFEngine__CollateralAddressCanNotBeZero();
 
     /**
      * @dev Reverts when attempting to deposit zero collateral amount
@@ -182,7 +182,7 @@ interface ISFEngine {
      *   - Mints SF Tokens to user
      *   - Automatically invests portion to Aave (based on investmentRatio)
      * @custom:reverts 
-     *   - With ISFEngine__InvalidCollateralAddress if collateralAddress is zero
+     *   - With ISFEngine__CollateralAddressCanNotBeZero if collateralAddress is zero
      *   - With ISFEngine__AmountCollateralToDepositCanNotBeZero for zero deposits
      *   - With AaveInvestmentIntegration__InsufficientBalance if investment fails
      * @custom:security 
@@ -221,6 +221,7 @@ interface ISFEngine {
     *          1. Caps the liquidatable collateral at total deposited amount
     *          2. Calculates the remaining bonus that couldn't be paid in collateral
     *          3. Converts the unpaid bonus to equivalent SF token value
+    *          4. Subtract actual amount to burn by bonus in SF token value
     *          
     *          This ensures:
     *          - Never attempts to transfer more collateral than exists
@@ -231,8 +232,8 @@ interface ISFEngine {
      * @param collateralAddress Collateral token to liquidate
      * @param debtToCover Amount of debt to cover (type(uint256).max for full debt)
      * @return actualAmountReceived Actual amount of collateral the liquidator receives
-     * @custom:reverts ISFEngine__InvalidUserAddress If user address is zero
-     * @custom:reverts ISFEngine__InvalidCollateralAddress If collateral address is zero
+     * @custom:reverts ISFEngine__UserAddressCanNotBeZero If user address is zero
+     * @custom:reverts ISFEngine__CollateralAddressCanNotBeZero If collateral address is zero
      * @custom:reverts ISFEngine__DebtToCoverCanNotBeZero If debtToCover is zero
      * @custom:reverts ISFEngine__InsufficientBalance If liquidator lacks sufficient SF tokens
      * @custom:reverts ISFEngine__CollateralRatioIsNotBroken If position is still healthy

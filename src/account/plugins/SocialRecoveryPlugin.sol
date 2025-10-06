@@ -127,7 +127,13 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function updateCustomRecoveryConfig(CustomRecoveryConfig memory customConfig) external override onlyEntryPoint {
+    function updateCustomRecoveryConfig(CustomRecoveryConfig memory customConfig) 
+        external 
+        override 
+        onlyEntryPoint 
+        notRecovering
+        requireNotFrozen 
+    {
         _updateCustomSocialRecoveryConfig(customConfig);
     }
 
@@ -146,8 +152,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     function receiveInitiateRecover(address newOwner) 
         external 
         override 
-        onlyGuardian 
-        requireNotFrozen 
+        onlyGuardian  
         recoverable 
         notRecovering 
     {
@@ -398,7 +403,7 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         return $.customRecoveryConfig.socialRecoveryEnabled;
     }
 
-    function _requireNotRecovering() private view {
+    function _requireNotRecovering() internal view {
         if (_existsPendingRecovery()) {
             revert ISocialRecoveryPlugin__AccountIsInRecoveryProcess();
         }
@@ -406,6 +411,9 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
 
     function _existsPendingRecovery() private view returns (bool) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
+        if (!$.customRecoveryConfig.socialRecoveryEnabled) {
+            return false;
+        }
         if ($.recoveryRecords.length == 0) {
             return false;
         }

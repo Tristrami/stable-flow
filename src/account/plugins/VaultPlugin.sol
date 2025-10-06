@@ -202,17 +202,23 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         onlySFAccount(account) 
         requireSupportedCollateral(collateralAddress)
     {
-        VaultPluginStorage storage $ = _getVaultPluginStorage();
-        uint256 sfBalance = this.balance();
-        uint256 allowance = debtToCover;
-        if (debtToCover == type(uint256).max) {
-            allowance = sfBalance;
+        if (debtToCover == 0) {
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
         }
-        if (debtToCover > sfBalance) {
-            revert IVaultPlugin__InsufficientBalance(address($.sfEngine), sfBalance, debtToCover);
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        uint256 maxDebtToCover = $.sfEngine.getSFDebt(account);
+        if (debtToCover == type(uint256).max) {
+            debtToCover = maxDebtToCover;
+        }
+        if (debtToCover > maxDebtToCover) {
+            revert IVaultPlugin__DebtToCoverExceedsTotalDebt(debtToCover, maxDebtToCover);
+        }
+        uint256 liquidatorSFBalance = this.balance();
+        if (liquidatorSFBalance < debtToCover) {
+            revert IVaultPlugin__InsufficientBalance(address($.sfEngine), liquidatorSFBalance, debtToCover);
         }
         emit IVaultPlugin__Liquidate(account, collateralAddress, debtToCover);
-        IERC20($.sfTokenAddress).approve(address($.sfEngine), allowance);
+        IERC20($.sfTokenAddress).approve(address($.sfEngine), debtToCover);
         $.sfEngine.liquidate(account, collateralAddress, debtToCover);
     }
 
@@ -248,6 +254,7 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         external 
         override 
         onlyEntryPoint 
+        requireNotFrozen
         requireSupportedCollateral(collateralAddress)
     {
         _topUpCollateral(collateralAddress, amount);
@@ -399,9 +406,22 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     }
 
     function _topUpCollateral(address collateralAddress, uint256 amountCollateral) private {
+        if (collateralAddress == address(0)) {
+            revert IVaultPlugin__CollateralNotSupported(collateralAddress);
+        }
+        if (amountCollateral == 0) {
+            revert IVaultPlugin__TokenAmountCanNotBeZero();
+        }
+        uint256 collateralInvested = _getCollateralInvested(collateralAddress);
+        if (collateralInvested == 0) {
+            revert IVaultPlugin__NotInvested();
+        }
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 collateralBalance = _getCollateralBalance(collateralAddress);
-        if (collateralBalance < amountCollateral) {
+        if (amountCollateral == type(uint256).max) {
+            amountCollateral = collateralBalance;
+        }
+        if (collateralBalance == 0 || collateralBalance < amountCollateral) {
             revert IVaultPlugin__InsufficientCollateral(
                 address($.sfEngine), 
                 collateralAddress, 

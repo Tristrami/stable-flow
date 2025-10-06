@@ -20,6 +20,8 @@ interface IVaultPlugin {
         uint256 required
     );
     error IVaultPlugin__DebtToRepayExceedsTotalDebt(uint256 debtToRepay, uint256 totalDebt);
+    error IVaultPlugin__DebtToCoverExceedsTotalDebt(uint256 debtToCover, uint256 totalDebt);
+    error IVaultPlugin__NotInvested();
     error IVaultPlugin__TopUpNotNeeded(
         uint256 currentCollateralInUsd, 
         uint256 requiredCollateralInUsd, 

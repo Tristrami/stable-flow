@@ -3,6 +3,7 @@ pragma solidity ^0.8.30;
 
 import {ISFAccount} from "../interfaces/ISFAccount.sol";
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
+import {FreezePlugin} from "./plugins/FreezePlugin.sol";
 import {VaultPlugin} from "./plugins/VaultPlugin.sol";
 import {SocialRecoveryPlugin} from "./plugins/SocialRecoveryPlugin.sol";
 import {BaseAccount} from "account-abstraction/contracts/core/BaseAccount.sol";
@@ -187,6 +188,12 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     ) internal view override returns (uint256 validationData) {
         address signer = ECDSA.recover(userOpHash, userOp.signature);
         return signer == owner() ? SIG_VALIDATION_SUCCESS : SIG_VALIDATION_FAILED;
+    }
+
+    /// @inheritdoc FreezePlugin
+    function _checkUnfreezeAccount(address /* unfrozenBy */) internal view override {
+        _requireFrozen();
+        _requireNotRecovering();
     }
 
     function _getSFTokenBalance() private view returns (uint256) {

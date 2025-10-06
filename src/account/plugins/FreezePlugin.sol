@@ -106,7 +106,7 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
     }
 
     function _unfreezeAccount(address unfrozenBy) internal {
-        _requireFrozen();
+        _checkUnfreezeAccount(unfrozenBy);
         FreezePluginStorage storage $ = _getFreezePluginStorage();
         $.frozen = false;
         FreezeRecord storage freezeRecord = $.freezeRecords[$.freezeRecords.length - 1];
@@ -131,4 +131,6 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
             revert IFreezePlugin__AccountIsFrozen();
         }
     }
+
+    function _checkUnfreezeAccount(address unfrozenBy) internal view virtual;
 }

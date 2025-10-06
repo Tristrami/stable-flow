@@ -2,8 +2,11 @@
 pragma solidity ^0.8.30;
 
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {IFreezePlugin} from "./IFreezePlugin.sol";
+import {IVaultPlugin} from "./IVaultPlugin.sol";
+import {ISocialRecoveryPlugin} from "./ISocialRecoveryPlugin.sol";
 
-interface ISFAccount is IERC165 {
+interface ISFAccount is IFreezePlugin, IVaultPlugin, ISocialRecoveryPlugin, IERC165 {
 
    /* -------------------------------------------------------------------------- */
     /*                                   Errors                                   */

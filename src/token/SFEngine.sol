@@ -213,7 +213,7 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         uint256 amountSFToMint
     ) external override requireSupportedCollateral(collateralAddress) {
         if (collateralAddress == address(0)) {
-            revert ISFEngine__InvalidCollateralAddress();
+            revert ISFEngine__CollateralAddressCanNotBeZero();
         }
         if (amountCollateral == 0) {
             revert ISFEngine__AmountCollateralToDepositCanNotBeZero();
@@ -231,7 +231,7 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         uint256 amountSFToBurn
     ) public override requireSupportedCollateral(collateralAddress) {
         if (collateralAddress == address(0)) {
-            revert ISFEngine__InvalidCollateralAddress();
+            revert ISFEngine__CollateralAddressCanNotBeZero();
         }
         if (amountSFToBurn == 0) {
             revert ISFEngine__AmountSFToBurnCanNotBeZero();
@@ -263,10 +263,7 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         returns (uint256)
     {
         if (user == address(0)) {
-            revert ISFEngine__InvalidUserAddress();
-        }
-        if (collateralAddress == address(0)) {
-            revert ISFEngine__InvalidCollateralAddress();
+            revert ISFEngine__UserAddressCanNotBeZero();
         }
         if (debtToCover == 0) {
             revert ISFEngine__DebtToCoverCanNotBeZero();

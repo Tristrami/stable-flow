@@ -570,7 +570,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.withdraw(collateral, 1 * PRECISION_FACTOR);
     }
 
-    function test_Withdraw_RevertWhen_AmountGreaterThanBalance() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_AmountExceedsBalance() public localTest accountCreated {
         uint256 amountToDeposit = 1 * PRECISION_FACTOR;
         uint256 amountToWithdraw = amountToDeposit + 1 * PRECISION_FACTOR;
         address collateral = $.deployConfig.wethTokenAddress;
@@ -693,7 +693,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.invest(collateral, 1 * PRECISION_FACTOR);
     }
 
-    function test_Invest_RevertWhen_AmountGreaterThanBalance() public localTest accountCreated {
+    function test_Invest_RevertWhen_AmountExceedsBalance() public localTest accountCreated {
         uint256 amountToDeposit = 1 * PRECISION_FACTOR;
         uint256 amountToInvest = amountToDeposit + 1 * PRECISION_FACTOR;
         address collateral = $.deployConfig.wethTokenAddress;
@@ -1022,7 +1022,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Harvest_RevertWhen_AmountToRedeemExceedsBalance() public ethSepoliaTest accountCreated deposited invested {
+    function test_Harvest_RevertWhen_AmountToRedeemExceedsDeposited() public ethSepoliaTest accountCreated deposited invested {
         address collateral = $.deployConfig.wethTokenAddress;
         // For this test, SF balance is equal to SF debts
         uint256 sfBalance = $.sfAccount.balance();
@@ -1112,17 +1112,92 @@ contract SFAccountTest is Test, Constants {
     /*                              Top-up Collateral                             */
     /* -------------------------------------------------------------------------- */
 
-    function testTopUpCollateral() public ethSepoliaTest accountCreated deposited invested {
+    function test_TopUp_RevertWhen_NotFromEntryPoint() public localTest accountCreated deposited {
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
+    }
+
+    function test_TopUp_RevertWhen_AccountIsFrozen() public localTest accountCreated deposited {
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
+        vm.stopPrank();
+    }
+
+    function test_TopUp_RevertWhen_CollateralAddressIsZero() public localTest accountCreated deposited {
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
+                address(0)
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.topUpCollateral(address(0), 1 * PRECISION_FACTOR);
+    }
+
+    function test_TopUp_RevertWhen_AmountToTopUpIsZero() public localTest accountCreated deposited {
+        vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 0);
+    }
+
+    function test_TopUp_RevertWhen_CollateralNotSupported() public localTest accountCreated deposited {
+        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
+                collateral
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.topUpCollateral(collateral, 1 * PRECISION_FACTOR);
+    }
+
+    function test_TopUp_RevertWhen_NotInvested() public localTest accountCreated deposited {
+        vm.expectRevert(IVaultPlugin.IVaultPlugin__NotInvested.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
+    }
+
+    function test_TopUp_RevertWhen_AmountToTopUpExceedsBalance() public ethSepoliaTest accountCreated deposited invested {
+        address collateral = $.deployConfig.wethTokenAddress;
+        uint256 collateralBalance = $.sfAccount.getCollateralBalance(collateral);
+        uint256 amountToTopUp = collateralBalance + 1 * PRECISION_FACTOR;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__InsufficientCollateral.selector,
+                address($.sfEngine),
+                collateral,
+                collateralBalance,
+                amountToTopUp
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.topUpCollateral(collateral, amountToTopUp);
+    }
+
+    function test_TopUp_TopUpCollaterals() public ethSepoliaTest accountCreated deposited invested {
         address weth = $.deployConfig.wethTokenAddress;
         address account = $.deployConfig.account;
         uint256 amountToTopUp = 1 * PRECISION_FACTOR;
-        uint256 amountInvested = INVEST_AMOUNT * $.sfEngine.getInvestmentRatio() / PRECISION_FACTOR;
-
+        uint256 amountInvestedToAave = amountToTopUp * $.sfEngine.getInvestmentRatio() / PRECISION_FACTOR;
+        
         uint256 startingAccountCollateral = $.sfAccount.getCollateralBalance(weth);
         uint256 startingEngineCollateral = IERC20(weth).balanceOf(address($.sfEngine));
         uint256 startingAmountDeposited = $.sfAccount.getCollateralInvested(weth);
-
-        _topUpCollateral(account, address($.sfAccount), weth, amountToTopUp);
+        
+        TopUpCollateral topUpCollateral = new TopUpCollateral();
+        vm.expectEmit(true, true, false, false);
+        emit IVaultPlugin__TopUpCollateral(weth, amountToTopUp);
+        topUpCollateral.run(
+            address($.sfAccountFactory), 
+            $.deployConfig.entryPointAddress,
+            account,
+            address($.sfAccount),
+            weth,
+            amountToTopUp
+        );
 
         assertEq(
             $.sfAccount.getCollateralBalance(weth), 
@@ -1130,7 +1205,43 @@ contract SFAccountTest is Test, Constants {
         );
         assertEq(
             IERC20(weth).balanceOf(address($.sfEngine)), 
-            startingEngineCollateral + amountToTopUp - amountInvested
+            startingEngineCollateral + amountToTopUp - amountInvestedToAave
+        );
+        assertEq( 
+            $.sfAccount.getCollateralInvested(weth), 
+            startingAmountDeposited + amountToTopUp
+        );
+    }
+
+    function test_TopUp_TopUpAllCollaterals() public ethSepoliaTest accountCreated deposited invested {
+        address weth = $.deployConfig.wethTokenAddress;
+        address account = $.deployConfig.account;
+        uint256 amountToTopUp = $.sfAccount.getCollateralBalance(weth);
+        uint256 amountInvestedToAave = amountToTopUp * $.sfEngine.getInvestmentRatio() / PRECISION_FACTOR;
+        
+        uint256 startingAccountCollateral = $.sfAccount.getCollateralBalance(weth);
+        uint256 startingEngineCollateral = IERC20(weth).balanceOf(address($.sfEngine));
+        uint256 startingAmountDeposited = $.sfAccount.getCollateralInvested(weth);
+        
+        TopUpCollateral topUpCollateral = new TopUpCollateral();
+        vm.expectEmit(true, true, false, false);
+        emit IVaultPlugin__TopUpCollateral(weth, amountToTopUp);
+        topUpCollateral.run(
+            address($.sfAccountFactory), 
+            $.deployConfig.entryPointAddress,
+            account,
+            address($.sfAccount),
+            weth,
+            type(uint256).max
+        );
+
+        assertEq(
+            $.sfAccount.getCollateralBalance(weth), 
+            startingAccountCollateral - amountToTopUp
+        );
+        assertEq(
+            IERC20(weth).balanceOf(address($.sfEngine)), 
+            startingEngineCollateral + amountToTopUp - amountInvestedToAave
         );
         assertEq( 
             $.sfAccount.getCollateralInvested(weth), 
@@ -1142,28 +1253,148 @@ contract SFAccountTest is Test, Constants {
     /*                                  Liquidate                                 */
     /* -------------------------------------------------------------------------- */
 
-    function testLiquidateUser() public ethSepoliaTest accountCreated deposited invested {
+    function test_Liquidate_RevertWhen_NotFromEntryPoint() public localTest accountCreated deposited {
+        address liquidatorAccount = _createSFAccount(user);
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            $.deployConfig.wethTokenAddress, 
+            1 * PRECISION_FACTOR
+        );
+    }
+
+    function test_Liquidate_RevertWhen_AccountIsFrozen() public localTest accountCreated deposited {
+        address liquidatorAccount = _createSFAccount(user);
+        vm.startPrank($.deployConfig.entryPointAddress);
+        ISFAccount(liquidatorAccount).freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            $.deployConfig.wethTokenAddress, 
+            1 * PRECISION_FACTOR
+        );
+        vm.stopPrank();
+    }
+
+    function test_Liquidate_RevertWhen_CollateralAddressIsZero() public localTest accountCreated deposited {
+        address liquidatorAccount = _createSFAccount(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
+                address(0)
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            address(0), 
+            1 * PRECISION_FACTOR
+        );
+    }
+
+    function test_Liquidate_RevertWhen_DebtToCoverIsZero() public localTest accountCreated deposited {
+        address liquidatorAccount = _createSFAccount(user);
+        vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            $.deployConfig.wethTokenAddress, 
+            0
+        );
+    }
+
+    function test_Liquidate_RevertWhen_CollateralNotSupported() public localTest accountCreated deposited {
+        address liquidatorAccount = _createSFAccount(user);
+        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
+                collateral
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            collateral, 
+            1 * PRECISION_FACTOR
+        );
+    }
+
+    function test_Liquidate_RevertWhen_DebtToCoverExceedsTotalDebt() public ethSepoliaTest accountCreated deposited invested {
+        address liquidatorAccount = _createSFAccount(user);
+        address collateral = $.deployConfig.wethTokenAddress;
+        uint256 totalDebt = $.sfAccount.debt();
+        uint256 debtToCover = totalDebt + 1 * PRECISION_FACTOR;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__DebtToCoverExceedsTotalDebt.selector,
+                debtToCover,
+                totalDebt
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            collateral, 
+            debtToCover
+        );
+    }
+
+    function test_Liquidate_RevertWhen_DebtToCoverExceedsBalance() public ethSepoliaTest accountCreated deposited invested {
+        address liquidatorAccount = _createSFAccount(user);
+        address collateral = $.deployConfig.wethTokenAddress;
+        uint256 debtToCover = $.sfAccount.debt();
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                IVaultPlugin.IVaultPlugin__InsufficientBalance.selector,
+                address($.sfEngine),
+                ISFAccount(liquidatorAccount).balance(),
+                debtToCover
+            )
+        );
+        vm.prank($.deployConfig.entryPointAddress);
+        ISFAccount(liquidatorAccount).liquidate(
+            address($.sfAccount), 
+            collateral, 
+            debtToCover
+        );
+    }
+
+    function test_Liquidate_LiquidateDebts() public ethSepoliaTest accountCreated deposited invested {
         address liquidator = user;
-        address liquidatorAccount = _createSFAccount(liquidator);
-        uint256 amountToInvest = INVEST_AMOUNT;
-        uint256 amountToTopUp = 10 * INVEST_AMOUNT;
+        address liquidatorAccount = _createSFAccount(user);
         address weth = $.deployConfig.wethTokenAddress;
         address wethPriceFeed = $.deployConfig.wethPriceFeedAddress;
+        uint256 amountLiquidatorToInvest = INVEST_AMOUNT;
+        uint256 amountToTopUp = 10 * amountLiquidatorToInvest;
+        // When weth price drops from 2000$ to 1900$
+        // Before liquidate: 190000$ weth => 10000$ SF. After liquidate: 16000$ weth => 7000$ SF
+        // Collateral ratio = 16000 / 7000 > 2 (min collateral ratio)
         uint256 debtToCover = 3000 * PRECISION_FACTOR;
-        _deposit(liquidator, liquidatorAccount, weth, amountToInvest);
-        _invest(liquidator, liquidatorAccount, weth, amountToInvest);
+        _deposit(liquidator, liquidatorAccount, weth, amountLiquidatorToInvest + amountToTopUp);
+        _invest(liquidator, liquidatorAccount, weth, amountLiquidatorToInvest);
         // Top up some collateral to make sure liquidator's collateral ratio won't be broken when eth price drops to 1900$
         _topUpCollateral(liquidator, liquidatorAccount, weth, amountToTopUp);
 
         uint256 startingUserDepositedAmount = $.sfAccount.getCollateralInvested(weth);
         uint256 startingLiquidatorSFBalance = ISFAccount(liquidatorAccount).balance();
-        uint256 startingLiquidatorWethBalance = IVaultPlugin(liquidatorAccount).getCollateralBalance(weth);
+        uint256 startingLiquidatorWethBalance = ISFAccount(liquidatorAccount).getCollateralBalance(weth);
 
         // Break $.sfAccount's collateral ratio
         MockV3Aggregator(wethPriceFeed).updateAnswer(int256(1900 * (10 ** PRICE_FEED_DECIMALS)));
 
-        // Liquidate
-        _liquidate(liquidator, liquidatorAccount, address($.sfAccount), weth, debtToCover);
+        Liquidate liquidate = new Liquidate();
+        vm.expectEmit(true, true, true, false);
+        emit IVaultPlugin__Liquidate(address($.sfAccount), weth, debtToCover);
+        liquidate.run(
+            address($.sfAccountFactory), 
+            address($.deployConfig.entryPointAddress),
+            liquidator,
+            liquidatorAccount,
+            address($.sfAccount),
+            weth,
+            debtToCover
+        );
 
         uint256 amountCollateral = AggregatorV3Interface(wethPriceFeed).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateral * $.sfEngine.getBonusRate() / PRECISION_FACTOR;
@@ -1177,7 +1408,57 @@ contract SFAccountTest is Test, Constants {
             startingLiquidatorSFBalance - debtToCover
         );
         assertEq(
-            IVaultPlugin(liquidatorAccount).getCollateralBalance(weth),
+            ISFAccount(liquidatorAccount).getCollateralBalance(weth),
+            startingLiquidatorWethBalance + expectedCollateralReceived
+        );
+    }
+
+    function test_Liquidate_LiquidateAllDebts() public ethSepoliaTest accountCreated deposited invested {
+        address liquidator = user;
+        address liquidatorAccount = _createSFAccount(user);
+        address weth = $.deployConfig.wethTokenAddress;
+        address wethPriceFeed = $.deployConfig.wethPriceFeedAddress;
+        uint256 amountLiquidatorToInvest = INVEST_AMOUNT;
+        uint256 amountToTopUp = 10 * amountLiquidatorToInvest;
+        uint256 debtToCover = $.sfAccount.debt();
+        _deposit(liquidator, liquidatorAccount, weth, amountLiquidatorToInvest + amountToTopUp);
+        _invest(liquidator, liquidatorAccount, weth, amountLiquidatorToInvest);
+        // Top up some collateral to make sure liquidator's collateral ratio won't be broken when eth price drops to 1900$
+        _topUpCollateral(liquidator, liquidatorAccount, weth, amountToTopUp);
+
+        uint256 startingUserDepositedAmount = $.sfAccount.getCollateralInvested(weth);
+        uint256 startingLiquidatorSFBalance = ISFAccount(liquidatorAccount).balance();
+        uint256 startingLiquidatorWethBalance = ISFAccount(liquidatorAccount).getCollateralBalance(weth);
+
+        // Break $.sfAccount's collateral ratio
+        MockV3Aggregator(wethPriceFeed).updateAnswer(int256(1900 * (10 ** PRICE_FEED_DECIMALS)));
+
+        Liquidate liquidate = new Liquidate();
+        vm.expectEmit(true, true, true, false);
+        emit IVaultPlugin__Liquidate(address($.sfAccount), weth, debtToCover);
+        liquidate.run(
+            address($.sfAccountFactory), 
+            address($.deployConfig.entryPointAddress),
+            liquidator,
+            liquidatorAccount,
+            address($.sfAccount),
+            weth,
+            type(uint256).max
+        );
+
+        uint256 amountCollateral = AggregatorV3Interface(wethPriceFeed).getTokensForValue(debtToCover);
+        uint256 bonus = amountCollateral * $.sfEngine.getBonusRate() / PRECISION_FACTOR;
+        uint256 expectedCollateralReceived = amountCollateral + bonus;
+        assertEq(
+            $.sfAccount.getCollateralInvested(weth),
+            startingUserDepositedAmount - expectedCollateralReceived
+        );
+        assertEq(
+            ISFAccount(liquidatorAccount).balance(),
+            startingLiquidatorSFBalance - debtToCover
+        );
+        assertEq(
+            ISFAccount(liquidatorAccount).getCollateralBalance(weth),
             startingLiquidatorWethBalance + expectedCollateralReceived
         );
     }
@@ -1186,7 +1467,107 @@ contract SFAccountTest is Test, Constants {
     /*                        Update Custom Recovery Config                       */
     /* -------------------------------------------------------------------------- */
 
-    function testUpdateCustomRecoveryConfig() public localTest accountCreated {
+    function test_UpdateCustomRecoveryConfig_RevertWhen_NotFromEntryPoint() 
+        public 
+        localTest 
+        accountCreated 
+    {
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        $.sfAccount.updateCustomRecoveryConfig(config);
+    }
+
+    function test_UpdateCustomRecoveryConfig_RevertWhen_AccountIsFrozen() 
+        public 
+        localTest 
+        accountCreated 
+    {
+        vm.startPrank($.deployConfig.entryPointAddress);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        $.sfAccount.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.stopPrank();
+    }
+
+    function test_UpdateCustomRecoveryConfig_RevertWhen_MinGuardianApprovalsIsZero()
+        public 
+        localTest 
+        accountCreated 
+    {
+        address[] memory guardiansToAdd = new address[](1);
+        guardiansToAdd[0] = _createSFAccount(guardian1);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = true;
+        config.minGuardianApprovals = 0;
+        config.guardians = guardiansToAdd;
+        config.recoveryTimeLock = 0;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__MinGuardianApprovalsCanNotBeZero.selector);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.stopPrank();
+    }
+
+    function test_UpdateCustomRecoveryConfig_RevertWhen_GuardiansIsEmpty()
+        public 
+        localTest 
+        accountCreated 
+    {
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = true;
+        config.minGuardianApprovals = 1;
+        config.guardians = new address[](0);
+        config.recoveryTimeLock = 0;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NoGuardianSet.selector);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.stopPrank();
+    }
+
+    function test_UpdateCustomRecoveryConfig_RevertWhen_MinApprovalsExceedsGuardianAmount()
+        public 
+        localTest 
+        accountCreated 
+    {
+        address[] memory guardiansToAdd = new address[](1);
+        guardiansToAdd[0] = _createSFAccount(guardian1);
+        uint8 minGuardianApprovals = uint8(guardiansToAdd.length + 1);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = true;
+        config.minGuardianApprovals = minGuardianApprovals;
+        config.guardians = guardiansToAdd;
+        config.recoveryTimeLock = 0;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ISocialRecoveryPlugin.ISocialRecoveryPlugin__ApprovalExceedsGuardianAmount.selector,
+                minGuardianApprovals,
+                guardiansToAdd.length
+            )
+        );
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.stopPrank();
+    }
+
+    function test_UpdateCustomRecoveryConfig_RevertWhen_AccountIsRecovering()
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        config.minGuardianApprovals = uint8(guardians.length - 1);
+        config.guardians = guardians;
+        config.recoveryTimeLock = 0;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        ISFAccount(guardians[0]).initiateRecovery(address($.sfAccount), user);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__AccountIsInRecoveryProcess.selector);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.stopPrank();
+    }
+
+    function test_UpdateCustomRecoveryConfig_Update() public localTest accountCreated {
         address guardian = _createSFAccount(user);
         address[] memory guardiansToUpdate = new address[](1);
         guardiansToUpdate[0] = guardian;
@@ -1201,6 +1582,8 @@ contract SFAccountTest is Test, Constants {
         config.recoveryTimeLock = recoveryTimeLock;
 
         UpdateCustomRecoveryConfig updateCustomRecoveryConfig = new UpdateCustomRecoveryConfig();
+        vm.expectEmit(false, false, false, true);
+        emit ISocialRecoveryPlugin__UpdateCustomRecoveryConfig(abi.encode(config));
         updateCustomRecoveryConfig.run(
             address($.sfAccountFactory), 
             address($.deployConfig.entryPointAddress),
@@ -1210,6 +1593,7 @@ contract SFAccountTest is Test, Constants {
         );
 
         ISocialRecoveryPlugin.CustomRecoveryConfig memory updatedConfig = $.sfAccount.getCustomRecoveryConfig();
+        assertEq($.sfAccount.supportsSocialRecovery(), socialRecoveryEnabled);
         assertEq(updatedConfig.guardians[0], guardian);
         assertEq(updatedConfig.socialRecoveryEnabled, socialRecoveryEnabled);
         assertEq(updatedConfig.minGuardianApprovals, minGuardianApprovals);
