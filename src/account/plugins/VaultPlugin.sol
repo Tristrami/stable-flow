@@ -345,6 +345,12 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         return $.customVaultConfig.collateralRatio;
     }
+
+    /// @inheritdoc IVaultPlugin
+    function getCurrentCollateralRatio() external view override returns (uint256) {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        return $.sfEngine.getCollateralRatio(address(this));
+    }
     
     /// @inheritdoc IVaultPlugin
     function getDepositedCollaterals() external view override returns (address[] memory) {
@@ -443,28 +449,29 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
             revert IVaultPlugin__TopUpNotNeeded(currentCollateralInUsd, requiredCollateralInUsd, targetCollateralRatio);
         }
         uint256 collateralToTopUpInUsd = requiredCollateralInUsd - currentCollateralInUsd;
+        uint256 remainingTopUpAmountInUsd = collateralToTopUpInUsd;
         address[] memory collaterals = $.depositedCollaterals.values();
-        for (uint256 i = 0; i < collaterals.length && collateralToTopUpInUsd > 0; i++) {
+        for (uint256 i = 0; i < collaterals.length && remainingTopUpAmountInUsd > 0; i++) {
             (bool collateralSupported, address priceFeed) = $.supportedCollaterals.tryGet(collaterals[i]);
             uint256 collateralBalance = _getCollateralBalance(collaterals[i]);
-            if (collateralSupported || collateralBalance == 0) {
+            if (!collateralSupported || collateralBalance == 0) {
                 continue;
             }
             uint256 collateralBalanceInUsd = AggregatorV3Interface(priceFeed).getTokenValue(collateralBalance);
             uint256 amountCollateralToTopUp;
-            if (collateralBalanceInUsd >= collateralToTopUpInUsd) {
-                amountCollateralToTopUp = AggregatorV3Interface(priceFeed).getTokensForValue(collateralToTopUpInUsd);
-                collateralToTopUpInUsd = 0;
+            if (collateralBalanceInUsd >= remainingTopUpAmountInUsd) {
+                amountCollateralToTopUp = AggregatorV3Interface(priceFeed).getTokensForValue(remainingTopUpAmountInUsd);
+                remainingTopUpAmountInUsd = 0;
             } else {
                 amountCollateralToTopUp = AggregatorV3Interface(priceFeed).getTokensForValue(collateralBalanceInUsd);
-                collateralToTopUpInUsd -= collateralBalanceInUsd;
+                remainingTopUpAmountInUsd -= collateralBalanceInUsd;
             }
             _topUpCollateral(collaterals[i], amountCollateralToTopUp);
         }
-        if (collateralToTopUpInUsd > 0) {
-            uint256 currentCollateralRatio = requiredCollateralInUsd * PRECISION_FACTOR / sfDebt;
+        if (remainingTopUpAmountInUsd > 0) {
+            uint256 currentCollateralRatio = currentCollateralInUsd * PRECISION_FACTOR / sfDebt;
             emit IVaultPlugin__InsufficientCollateralForTopUp(
-                collateralToTopUpInUsd,
+                remainingTopUpAmountInUsd,
                 currentCollateralRatio,
                 targetCollateralRatio
             );

@@ -101,6 +101,7 @@ library OracleLib {
         AggregatorV3Interface aggregator, 
         uint256 value
     ) internal view returns (uint256) {
-        return value * PRECISION_FACTOR / getPrice(aggregator);
+        uint256 price = getPrice(aggregator);
+        return (value * PRECISION_FACTOR + price - 1) / price;
     }
 }

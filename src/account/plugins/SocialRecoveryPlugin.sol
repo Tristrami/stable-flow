@@ -145,11 +145,11 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         requireNotFrozen 
         recoverableAccount(account) 
     {
-        ISocialRecoveryPlugin(account).receiveInitiateRecover(newOwner);
+        ISocialRecoveryPlugin(account).receiveInitiateRecovery(newOwner);
     }
 
     /// @inheritdoc ISocialRecoveryPlugin
-    function receiveInitiateRecover(address newOwner) 
+    function receiveInitiateRecovery(address newOwner) 
         external 
         override 
         onlyGuardian  
@@ -171,7 +171,9 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
             executableTime: 0
         });
         $.recoveryRecords.push(recoveryRecord);
-        _freezeAccount(msg.sender);
+        if (!_isFrozen()) {
+            _freezeAccount(msg.sender);
+        }
         emit ISocialRecoveryPlugin__RecoveryInitiated(msg.sender, newOwner);
     }
 

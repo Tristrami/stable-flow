@@ -260,10 +260,16 @@ interface IVaultPlugin {
 
     /**
      * @dev Get the custom collateral ratio for this vault
-     * @return uint256 The custom collateral ratio value
      * @notice Returns the vault-specific collateral ratio setting
+     * @return uint256 The custom collateral ratio value
      */
     function getCustomCollateralRatio() external view returns (uint256);
+
+    /**
+     * @dev Get current collateral ratio for this vault
+     * @return uint256 The current collateral ratio value
+     */
+    function getCurrentCollateralRatio() external view returns (uint256);
 
     /**
      * @dev Get the list of all deposited collateral tokens

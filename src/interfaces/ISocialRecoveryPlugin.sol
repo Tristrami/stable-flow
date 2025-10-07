@@ -281,7 +281,7 @@ interface ISocialRecoveryPlugin {
      * - Not already in recovery (notRecovering)
      * @notice Creates a new recovery record and freezes the account
      */
-    function receiveInitiateRecover(address newOwner) external;
+    function receiveInitiateRecovery(address newOwner) external;
 
     /**
      * @dev Approves a recovery process for an account

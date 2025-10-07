@@ -269,9 +269,8 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
             revert ISFEngine__DebtToCoverCanNotBeZero();
         }
         _requireCollateralRatioIsBroken(user);
-        uint256 userDebt = sfDebts[user];
         if (debtToCover == type(uint256).max) {
-            debtToCover = userDebt;
+            debtToCover = sfDebts[user];
         }
         uint256 liquidatorBalance = sfToken.balanceOf(msg.sender);
         if (debtToCover > liquidatorBalance) {
@@ -282,7 +281,6 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         if (amountCollateralToLiquidate > amountDeposited) {
             amountCollateralToLiquidate = amountDeposited;
         }
-        uint256 amountSFToBurn = debtToCover;
         uint256 bonus = amountCollateralToLiquidate * bonusRate / PRECISION_FACTOR;
         uint256 amountCollateralGiveToLiquidator = amountCollateralToLiquidate + bonus;
         uint256 bonusInSFToken;
@@ -293,7 +291,7 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         } else {
             amountCollateralToLiquidate += bonus;
         }
-        _burnSFToken(msg.sender, user, amountSFToBurn, debtToCover, bonusInSFToken);
+        _burnSFToken(msg.sender, user, debtToCover, debtToCover, bonusInSFToken);
         uint256 actualAmountRedeemed = _redeemCollateral(
             collateralAddress, 
             amountCollateralToLiquidate, 

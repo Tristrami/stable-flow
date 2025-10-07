@@ -30,7 +30,7 @@ abstract contract BaseSFAccountPlugin is ISFAccount, BaseAccount, OwnableUpgrade
 
     using ERC165Checker for address;
 
-    error BaseSFAccountPlugin__NotSFAccount(address account);
+    error BaseSFAccountPlugin__NotSFAccount();
 
     modifier onlyEntryPoint() {
         _requireFromEntryPoint();
@@ -46,7 +46,7 @@ abstract contract BaseSFAccountPlugin is ISFAccount, BaseAccount, OwnableUpgrade
         if (account == address(0) 
             || account.code.length == 0
             || !account.supportsInterface(type(ISFAccount).interfaceId)) {
-            revert BaseSFAccountPlugin__NotSFAccount(account);
+            revert BaseSFAccountPlugin__NotSFAccount();
         }
     }
 

@@ -1080,7 +1080,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Harvest_HarvestAllInvestment() public ethSepoliaTest accountCreated deposited invested {
         address weth = $.deployConfig.wethTokenAddress;
-        address account = $.deployConfig.account;
         uint256 collateralInvested = $.sfAccount.getCollateralInvested(weth);
         uint256 amountToRedeem = $.sfAccount.getCollateralInvested(weth);
         uint256 debtToRepay = $.sfAccount.balance();
@@ -1095,7 +1094,7 @@ contract SFAccountTest is Test, Constants {
         harvest.run(
             address($.sfAccountFactory), 
             $.deployConfig.entryPointAddress,
-            account,
+            $.deployConfig.account,
             address($.sfAccount),
             weth,
             type(uint256).max,
@@ -1247,6 +1246,61 @@ contract SFAccountTest is Test, Constants {
             $.sfAccount.getCollateralInvested(weth), 
             startingAmountDeposited + amountToTopUp
         );
+    }
+
+    function test_TopUp_AutoTopUp() public ethSepoliaTest accountCreated deposited invested {
+        uint256 newPrice = 1000 * 10 ** PRICE_FEED_DECIMALS;
+        // Update weth price, make collateral ratio drop to 1
+        MockV3Aggregator($.deployConfig.wethPriceFeedAddress).updateAnswer(int256(newPrice));
+        uint256 sfDebt = $.sfAccount.debt();
+        uint256 customCollateralRatio = $.sfAccount.getCustomCollateralRatio();
+        uint256 currentCollateralInUsd = $.sfEngine.getTotalCollateralValueInUsd(address($.sfAccount));
+        uint256 requiredCollateralInUsd = sfDebt * customCollateralRatio / PRECISION_FACTOR;
+        uint256 collateralToTopUpInUsd = requiredCollateralInUsd - currentCollateralInUsd;
+        console2.log("collateralToTopUpInUsd", collateralToTopUpInUsd);
+        console2.log("customCollateralRatio", customCollateralRatio);
+        (bool upKeepNeeded, ) = $.sfAccount.checkUpkeep("");
+        assertEq(upKeepNeeded, true);
+        vm.expectEmit(true, true, false, false);
+        emit IVaultPlugin__CollateralRatioMaintained(collateralToTopUpInUsd, customCollateralRatio);
+        $.sfAccount.performUpkeep("");
+        (bool danger, uint256 collateralRatio, ) = $.sfAccount.checkCollateralSafety();
+        assertEq(danger, false);
+        assertEq(collateralRatio, $.sfAccount.getCustomCollateralRatio());
+    }
+
+    function test_AutoTopUp_When_CollateralIsInsufficient() public ethSepoliaTest accountCreated {
+        address weth = $.deployConfig.wethTokenAddress;
+        vm.prank($.sfAccount.owner());
+        IERC20(weth).approve(address($.sfAccount), INVEST_AMOUNT);
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.deposit(weth, INVEST_AMOUNT);
+        $.sfAccount.invest(weth, INVEST_AMOUNT);
+        vm.stopPrank();
+        uint256 newPrice = 1000 * 10 ** PRICE_FEED_DECIMALS;
+        // Update weth price, make collateral ratio drop to 1
+        MockV3Aggregator($.deployConfig.wethPriceFeedAddress).updateAnswer(int256(newPrice));
+        uint256 sfDebt = $.sfAccount.debt();
+        uint256 customCollateralRatio = $.sfAccount.getCustomCollateralRatio();
+        uint256 startingCollateralRatio = $.sfAccount.getCurrentCollateralRatio();
+        uint256 currentCollateralInUsd = $.sfEngine.getTotalCollateralValueInUsd(address($.sfAccount));
+        uint256 requiredCollateralInUsd = sfDebt * customCollateralRatio / PRECISION_FACTOR;
+        uint256 collateralToTopUpInUsd = requiredCollateralInUsd - currentCollateralInUsd;
+        (bool upKeepNeeded, ) = $.sfAccount.checkUpkeep("");
+        assertEq(upKeepNeeded, true);
+        console2.log("collateralToTopUpInUsd", collateralToTopUpInUsd);
+        console2.log("startingCollateralRatio", startingCollateralRatio);
+        console2.log("customCollateralRatio", customCollateralRatio);
+        vm.expectEmit(true, true, true, false);
+        emit IVaultPlugin__InsufficientCollateralForTopUp(
+            collateralToTopUpInUsd,
+            startingCollateralRatio,
+            customCollateralRatio
+        );
+        $.sfAccount.performUpkeep("");
+        (bool danger, uint256 collateralRatio, ) = $.sfAccount.checkCollateralSafety();
+        assertEq(danger, true);
+        assertEq(collateralRatio, startingCollateralRatio);
     }
 
     /* -------------------------------------------------------------------------- */
@@ -1604,7 +1658,127 @@ contract SFAccountTest is Test, Constants {
     /*                              Initiate Recovery                             */
     /* -------------------------------------------------------------------------- */
 
-    function testInitiateRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Initiate_RevertWhen_NotFromEntryPoint() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        guardian.initiateRecovery(address($.sfAccount), user);
+    }
+
+    function test_Initiate_RevertWhen_AccountIsFrozen() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.startPrank($.deployConfig.entryPointAddress);
+        guardian.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        guardian.initiateRecovery(address($.sfAccount), user);
+        vm.stopPrank();
+    }
+
+    function test_Initiate_RevertWhen_AccountIsZeroAddress() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.initiateRecovery(address(0), user);
+    }
+
+    function test_Initiate_RevertWhen_AccountIsRandomContract() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.initiateRecovery($.deployConfig.wethTokenAddress, user);
+    }
+
+    function test_Initiate_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        guardian.initiateRecovery(address($.sfAccount), user);
+        vm.stopPrank();
+    }
+
+    function test_ReceiveInitiate_RevertWhen_NotCalledFromGuardian() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__OnlyGuardian.selector);
+        vm.prank(user);
+        $.sfAccount.receiveInitiateRecovery(user);
+    }
+
+    function test_ReceiveInitiate_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        $.sfAccount.receiveInitiateRecovery(user);
+    }
+
+    function test_ReceiveInitiate_RevertWhen_AccountIsRecovering() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.startPrank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__AccountIsInRecoveryProcess.selector);
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.stopPrank();
+    }
+
+    function test_ReceiveInitiate_When_AccountIsFrozen() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.freeze();
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        assertEq($.sfAccount.isRecovering(), true);
+    }
+
+    function test_Initiate_InitiateRecovery() public localTest accountCreated recoveryConfigured {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -1634,7 +1808,119 @@ contract SFAccountTest is Test, Constants {
     /*                              Approve Recovery                              */
     /* -------------------------------------------------------------------------- */
 
-    function testApproveRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Approve_RevertWhen_NotFromEntryPoint() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        guardian.approveRecovery(address($.sfAccount));
+    }
+
+    function test_Approve_RevertWhen_AccountIsFrozen() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.startPrank($.deployConfig.entryPointAddress);
+        guardian.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        guardian.approveRecovery(address($.sfAccount));
+        vm.stopPrank();
+    }
+
+    function test_Approve_RevertWhen_AccountIsZeroAddress() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.approveRecovery(address(0));
+    }
+
+    function test_Approve_RevertWhen_AccountIsRandomContract() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.approveRecovery($.deployConfig.wethTokenAddress);
+    }
+
+    function test_Approve_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        guardian.approveRecovery(address($.sfAccount));
+        vm.stopPrank();
+    }
+
+    function test_ReceiveApprove_RevertWhen_NotCalledFromGuardian() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__OnlyGuardian.selector);
+        vm.prank(user);
+        $.sfAccount.receiveApproveRecovery();
+    }
+
+    function test_ReceiveApprove_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        $.sfAccount.receiveApproveRecovery();
+    }
+
+    function test_ReceiveApprove_RevertWhen_AccountIsNotRecovering() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveApproveRecovery();
+    }
+
+    function test_Approve_ApproveRecovery() public localTest accountCreated recoveryConfigured {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -1671,7 +1957,213 @@ contract SFAccountTest is Test, Constants {
     /*                              Complete Recovery                             */
     /* -------------------------------------------------------------------------- */
 
-    function testCompleteRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Complete_RevertWhen_NotFromEntryPoint() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        guardian.completeRecovery(address($.sfAccount));
+    }
+
+    function test_Complete_RevertWhen_AccountIsFrozen() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.startPrank($.deployConfig.entryPointAddress);
+        guardian.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        guardian.completeRecovery(address($.sfAccount));
+        vm.stopPrank();
+    }
+
+    function test_Complete_RevertWhen_AccountIsZeroAddress() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.completeRecovery(address(0));
+    }
+
+    function test_Complete_RevertWhen_AccountIsRandomContract() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.completeRecovery($.deployConfig.wethTokenAddress);
+    }
+
+    function test_Complete_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        guardian.completeRecovery(address($.sfAccount));
+        vm.stopPrank();
+    }
+
+    function test_ReceiveComplete_RevertWhen_NotCalledFromGuardian() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__OnlyGuardian.selector);
+        vm.prank(user);
+        $.sfAccount.receiveCompleteRecovery();
+    }
+
+    function test_ReceiveComplete_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        $.sfAccount.receiveCompleteRecovery();
+    }
+
+    function test_ReceiveComplete_RevertWhen_AccountIsNotRecovering() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveCompleteRecovery();
+    }
+
+    function test_ReceiveComplete_RevertWhen_ApprovalsAreInsufficient() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {   
+        ISFAccount guardianAccount1 = ISFAccount(guardians[0]);
+        vm.startPrank(address(guardianAccount1));
+        $.sfAccount.receiveInitiateRecovery(user);
+        $.sfAccount.receiveApproveRecovery();
+        vm.stopPrank();
+        (, uint256 receivedApprovals, uint256 requiredApprovals, ) = $.sfAccount.getRecoveryProgress();
+        vm.prank(address(guardianAccount1));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ISocialRecoveryPlugin.ISocialRecoveryPlugin__InsufficientApprovals.selector,
+                receivedApprovals,
+                requiredApprovals
+            )
+        );
+        $.sfAccount.receiveCompleteRecovery();
+    }
+
+    function test_ReceiveComplete_RevertWhen_RecoveryIsNotYetExecutable() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {   
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.recoveryTimeLock = 1 days;
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+
+        ISFAccount guardianAccount1 = ISFAccount(guardians[0]);
+        ISFAccount guardianAccount2 = ISFAccount(guardians[1]);
+
+        uint256 executableTime = block.timestamp + config.recoveryTimeLock;
+        vm.startPrank(address(guardianAccount1));
+        $.sfAccount.receiveInitiateRecovery(user);
+        $.sfAccount.receiveApproveRecovery();
+        vm.stopPrank();
+        vm.prank(address(guardianAccount2));
+        $.sfAccount.receiveApproveRecovery();
+
+        vm.prank(address(guardianAccount1));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                ISocialRecoveryPlugin.ISocialRecoveryPlugin__RecoveryNotExecutable.selector,
+                executableTime
+            )
+        );
+        $.sfAccount.receiveCompleteRecovery();
+    }
+
+    function test_ReceiveComplete_RevertWhen_RecoveryIsCompleted() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {   
+        ISFAccount guardianAccount1 = ISFAccount(guardians[0]);
+        ISFAccount guardianAccount2 = ISFAccount(guardians[1]);
+        vm.startPrank(address(guardianAccount1));
+        $.sfAccount.receiveInitiateRecovery(user);
+        $.sfAccount.receiveApproveRecovery();
+        vm.stopPrank();
+        vm.startPrank(address(guardianAccount2));
+        $.sfAccount.receiveApproveRecovery();
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveCompleteRecovery();
+        vm.stopPrank();
+    }
+
+    function test_ReceiveComplete_RevertWhen_RecoveryIsCancelled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {   
+        ISFAccount guardianAccount1 = ISFAccount(guardians[0]);
+        vm.startPrank(address(guardianAccount1));
+        $.sfAccount.receiveInitiateRecovery(user);
+        $.sfAccount.receiveCancelRecovery();
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveCompleteRecovery();
+        vm.stopPrank();
+    }
+
+    function test_Complete_CompleteRecoveryWithoutTimeLock() 
+        public 
+        localTest
+        accountCreated
+        recoveryConfigured 
+    {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -1705,7 +2197,12 @@ contract SFAccountTest is Test, Constants {
         assertEq(latestRecord.cancelledBy, address(0));
     }
 
-    function testCompleteRecoveryWithTimeLock() public localTest accountCreated recoveryConfigured {
+    function test_Complete_CompleteRecoveryWithTimeLock() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured 
+    {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         uint256 executeTimeLock = 1 days;
@@ -1748,7 +2245,154 @@ contract SFAccountTest is Test, Constants {
     /*                               Cancel Recovery                              */
     /* -------------------------------------------------------------------------- */
 
-    function testCancelRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Cancel_RevertWhen_NotFromEntryPoint() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        guardian.cancelRecovery(address($.sfAccount));
+    }
+
+    function test_Cancel_RevertWhen_AccountIsFrozen() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.startPrank($.deployConfig.entryPointAddress);
+        guardian.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        guardian.cancelRecovery(address($.sfAccount));
+        vm.stopPrank();
+    }
+
+    function test_Cancel_RevertWhen_AccountIsZeroAddress() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.cancelRecovery(address(0));
+    }
+
+    function test_Cancel_RevertWhen_AccountIsRandomContract() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        $.sfAccount.receiveInitiateRecovery(user);
+        vm.expectRevert(BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector);
+        vm.prank($.deployConfig.entryPointAddress);
+        guardian.cancelRecovery($.deployConfig.wethTokenAddress);
+    }
+
+    function test_Cancel_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        guardian.cancelRecovery(address($.sfAccount));
+        vm.stopPrank();
+    }
+
+    function test_ReceiveCancel_RevertWhen_NotCalledFromGuardian() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__OnlyGuardian.selector);
+        vm.prank(user);
+        $.sfAccount.receiveCancelRecovery();
+    }
+
+    function test_ReceiveCancel_RevertWhen_RecoveryNotEnabled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
+        config.socialRecoveryEnabled = false;
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.updateCustomRecoveryConfig(config);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__SocialRecoveryNotSupported.selector);
+        $.sfAccount.receiveCancelRecovery();
+    }
+
+    function test_ReceiveCancel_RevertWhen_AccountIsNotRecovering() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardian = ISFAccount(guardians[0]);
+        vm.prank(address(guardian));
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveCancelRecovery();
+    }
+
+    function test_ReceiveCancel_RevertWhen_AccountIsCancelled() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardianAccount1 = ISFAccount(guardians[0]);
+        vm.startPrank(address(guardianAccount1));
+        $.sfAccount.receiveInitiateRecovery(user);
+        $.sfAccount.receiveCancelRecovery();
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveCancelRecovery();
+        vm.stopPrank();
+    }
+
+    function test_ReceiveCancel_RevertWhen_AccountIsCompleted() 
+        public 
+        localTest 
+        accountCreated 
+        recoveryConfigured
+    {
+        ISFAccount guardianAccount1 = ISFAccount(guardians[0]);
+        ISFAccount guardianAccount2 = ISFAccount(guardians[1]);
+
+        vm.startPrank(address(guardianAccount1));
+        $.sfAccount.receiveInitiateRecovery(user);
+        $.sfAccount.receiveApproveRecovery();
+        vm.stopPrank();
+        vm.startPrank(address(guardianAccount2));
+        $.sfAccount.receiveApproveRecovery();
+        vm.expectRevert(ISocialRecoveryPlugin.ISocialRecoveryPlugin__NotInRecoveryProcess.selector);
+        $.sfAccount.receiveCancelRecovery();
+        vm.stopPrank();
+    }
+
+    function test_Cancel_CancelRecovery() public localTest accountCreated recoveryConfigured {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();

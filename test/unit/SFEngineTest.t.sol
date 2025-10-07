@@ -394,59 +394,53 @@ contract SFEngineTest is Test, Constants {
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(address(weth), address($.sfEngine));
 
-        // Prepare redeem data
-        uint256 amountCollateralToRedeem = DEFAULT_AMOUNT_COLLATERAL / 2;
-        console2.log("amountCollateralToRedeem:", amountCollateralToRedeem);
-        uint256 amountCollateralLeft =
-            $.sfEngine.getCollateralAmount(user, $.deployConfig.wethTokenAddress) - amountCollateralToRedeem;
-        console2.log("amountCollateralLeft:", amountCollateralLeft);
-        // Maximum amount of sf the user can hold after collateral is redeemed
-        uint256 maximumAmountSFToHold = $.sfEngine.calculateSFTokensByCollateral(
-            $.deployConfig.wethTokenAddress, 
-            amountCollateralLeft, 
-            DEFAULT_COLLATERAL_RATIO
-        );
-        console2.log("maximumAmountSFToHold:", maximumAmountSFToHold);
-        // The minimum amount of sf that it is supposed to burn to maintain the collateral ratio
-        uint256 minimumAmountSFToBurn = $.sfEngine.getSFDebt(user) - maximumAmountSFToHold;
-        console2.log("minimumAmountSFToBurn:", minimumAmountSFToBurn);
-        // Calculate expected collateral ratio after redeem
-        uint256 amountSFLeft = $.sfEngine.getSFDebt(user) - minimumAmountSFToBurn;
-        console2.log("amountSFLeft:", amountSFLeft);
-        uint256 amountCollateralLeftInUsd = AggregatorV3Interface(
-            $.deployConfig.wethPriceFeedAddress
-        ).getTokenValue(amountCollateralLeft);
-        console2.log("amountCollateralLeftInUsd:", amountCollateralLeftInUsd);
-        uint256 expectedCollateralRatioAfterRedeem = (amountCollateralLeftInUsd * PRECISION_FACTOR) / amountSFLeft;
-        console2.log("expectedCollateralRatioAfterRedeem:", expectedCollateralRatioAfterRedeem);
-        vm.startPrank(user);
-        $.sfToken.approve(address($.sfEngine), minimumAmountSFToBurn);
+        {
+            // Prepare redeem data
+            uint256 amountCollateralToRedeem = DEFAULT_AMOUNT_COLLATERAL / 2;
+            console2.log("amountCollateralToRedeem:", amountCollateralToRedeem);
+            uint256 amountCollateralLeft =
+                $.sfEngine.getCollateralAmount(user, $.deployConfig.wethTokenAddress) - amountCollateralToRedeem;
+            console2.log("amountCollateralLeft:", amountCollateralLeft);
+            // Maximum amount of sf the user can hold after collateral is redeemed
+            uint256 maximumAmountSFToHold = $.sfEngine.calculateSFTokensByCollateral(
+                $.deployConfig.wethTokenAddress, 
+                amountCollateralLeft, 
+                DEFAULT_COLLATERAL_RATIO
+            );
+            console2.log("maximumAmountSFToHold:", maximumAmountSFToHold);
+            // The minimum amount of sf that it is supposed to burn to maintain the collateral ratio
+            uint256 minimumAmountSFToBurn = $.sfEngine.getSFDebt(user) - maximumAmountSFToHold;
+            console2.log("minimumAmountSFToBurn:", minimumAmountSFToBurn);
+            // Calculate expected collateral ratio after redeem
+            uint256 amountSFLeft = $.sfEngine.getSFDebt(user) - minimumAmountSFToBurn;
+            console2.log("amountSFLeft:", amountSFLeft);
+            uint256 amountCollateralLeftInUsd = AggregatorV3Interface(
+                $.deployConfig.wethPriceFeedAddress
+            ).getTokenValue(amountCollateralLeft);
+            console2.log("amountCollateralLeftInUsd:", amountCollateralLeftInUsd);
+            uint256 expectedCollateralRatioAfterRedeem = (amountCollateralLeftInUsd * PRECISION_FACTOR) / amountSFLeft;
+            console2.log("expectedCollateralRatioAfterRedeem:", expectedCollateralRatioAfterRedeem);
+            vm.startPrank(user);
+            $.sfToken.approve(address($.sfEngine), minimumAmountSFToBurn);
 
-        // Redeem
-        $.sfEngine.redeemCollateral(
-            $.deployConfig.wethTokenAddress, amountCollateralToRedeem, minimumAmountSFToBurn
-        );
-
-        // Ending balance
-        uint256 endingUserWethBalance = weth.balanceOf(user);
-        uint256 endingUserSFBalance = $.sfToken.balanceOf(user);
-        (uint256 endingATokenBalance, , , , , , , , ) = IPoolDataProvider(
-            $.deployConfig.aaveDataProviderAddress
-        ).getUserReserveData(address(weth), address($.sfEngine));
-        uint256 endingEngineWethBalance = weth.balanceOf(address($.sfEngine));
-        // Ending data
-        uint256 endingAmountDeposited = $.sfEngine.getCollateralAmount(user, address(weth));
-        uint256 endingAmountMinted = $.sfEngine.getSFDebt(user);
-
-        // Check balance
-        assertEq(endingUserWethBalance, startingUserWethBalance + amountCollateralToRedeem);
-        assertEq(endingUserSFBalance, startingUserSFBalance - minimumAmountSFToBurn);
-        assertEq(endingEngineWethBalance, startingEngineWethBalance - amountCollateralToRedeem);
-
-        // Check data
-        assertEq(endingAmountDeposited, startingAmountDeposited - amountCollateralToRedeem);
-        assertEq(endingAmountMinted, startingAmountMinted - minimumAmountSFToBurn);
-        assertEq(startingATokenBalance, endingATokenBalance);
+            // Redeem
+            $.sfEngine.redeemCollateral(
+                $.deployConfig.wethTokenAddress, amountCollateralToRedeem, minimumAmountSFToBurn
+            );
+            (uint256 endingATokenBalance, , , , , , , , ) = IPoolDataProvider(
+                $.deployConfig.aaveDataProviderAddress
+            ).getUserReserveData(address(weth), address($.sfEngine));
+    
+            // Check balance
+            assertEq(weth.balanceOf(user), startingUserWethBalance + amountCollateralToRedeem);
+            assertEq($.sfToken.balanceOf(user), startingUserSFBalance - minimumAmountSFToBurn);
+            assertEq(weth.balanceOf(address($.sfEngine)), startingEngineWethBalance - amountCollateralToRedeem);
+    
+            // Check data
+            assertEq($.sfEngine.getCollateralAmount(user, address(weth)), startingAmountDeposited - amountCollateralToRedeem);
+            assertEq($.sfEngine.getSFDebt(user), startingAmountMinted - minimumAmountSFToBurn);
+            assertEq(endingATokenBalance, startingATokenBalance);
+        }
     }
 
     function testRedeemAllCollateral() 
@@ -586,35 +580,23 @@ contract SFEngineTest is Test, Constants {
         // Liquidate
         $.sfEngine.liquidate(user, address(weth), debtToCover);
         vm.stopPrank();
-
-        // Ending balance
-        uint256 endingLiquidatorWethBalance = weth.balanceOf(liquidator);
-        uint256 endingLiquidatorSFBalance = $.sfToken.balanceOf(liquidator);
-        uint256 endingEngineWethBalance = weth.balanceOf(address($.sfEngine));
         (uint256 endingATokenBalance, , , , , , , , ) = IPoolDataProvider(
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(address(weth), address($.sfEngine));
-
-        // Ending data
-        uint256 endingUserAmountDeposited = $.sfEngine.getCollateralAmount(user, address(weth));
-        uint256 endingLiquidatorAmountDeposited = $.sfEngine.getCollateralAmount(liquidator, address(weth));
-        uint256 endingUserAmountMinted = $.sfEngine.getSFDebt(user);
-
-        // Check balance
         uint256 amountCollateralToLiquidate = AggregatorV3Interface(
             $.deployConfig.wethPriceFeedAddress
         ).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
         uint256 amountCollateralLiquidatorReceived = amountCollateralToLiquidate + bonus;
-        assertEq(endingLiquidatorWethBalance, startingLiquidatorWethBalance + amountCollateralLiquidatorReceived);
-        assertEq(endingLiquidatorSFBalance, startingLiquidatorSFBalance - debtToCover);
-        assertEq(endingEngineWethBalance, startingEngineWethBalance - amountCollateralLiquidatorReceived);
+        assertEq(weth.balanceOf(liquidator), startingLiquidatorWethBalance + amountCollateralLiquidatorReceived);
+        assertEq($.sfToken.balanceOf(liquidator), startingLiquidatorSFBalance - debtToCover);
+        assertEq(weth.balanceOf(address($.sfEngine)), startingEngineWethBalance - amountCollateralLiquidatorReceived);
         assertEq(endingATokenBalance, startingATokenBalance);
 
         // Check data
-        assertEq(endingUserAmountDeposited, startingUserAmountDeposited - amountCollateralLiquidatorReceived);
-        assertEq(endingLiquidatorAmountDeposited, startingLiquidatorAmountDeposited);
-        assertEq(endingUserAmountMinted, startingUserAmountMinted - debtToCover);
+        assertEq($.sfEngine.getCollateralAmount(user, address(weth)), startingUserAmountDeposited - amountCollateralLiquidatorReceived);
+        assertEq($.sfEngine.getCollateralAmount(liquidator, address(weth)), startingLiquidatorAmountDeposited);
+        assertEq($.sfEngine.getSFDebt(user), startingUserAmountMinted - debtToCover);
     }
 
     function test_LiquidateWhen_DebtToCoverExceedsUserCollateral() 
@@ -635,7 +617,6 @@ contract SFEngineTest is Test, Constants {
             LIQUIDATOR_DEPOSIT_AMOUNT, 
             $.sfEngine.getSFDebt(user)
         );
-
         // Starting balance
         uint256 startingLiquidatorWethBalance = weth.balanceOf(liquidator);
         uint256 startingLiquidatorSFBalance = $.sfToken.balanceOf(liquidator);
@@ -659,35 +640,21 @@ contract SFEngineTest is Test, Constants {
         // Liquidate
         $.sfEngine.liquidate(user, address(weth), debtToCover);
         vm.stopPrank();
-
-        // Ending balance
-        uint256 endingLiquidatorWethBalance = weth.balanceOf(liquidator);
-        uint256 endingLiquidatorSFBalance = $.sfToken.balanceOf(liquidator);
-        uint256 endingEngineWethBalance = weth.balanceOf(address($.sfEngine));
         (uint256 endingATokenBalance, , , , , , , , ) = IPoolDataProvider(
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(address(weth), address($.sfEngine));
-
-        // Ending data
-        uint256 endingUserAmountDeposited = $.sfEngine.getCollateralAmount(user, address(weth));
-        uint256 endingLiquidatorAmountDeposited = $.sfEngine.getCollateralAmount(liquidator, address(weth));
-        uint256 endingUserAmountMinted = $.sfEngine.getSFDebt(user);
-
-        // Check balance
         uint256 amountCollateralToLiquidate = AggregatorV3Interface(
             $.deployConfig.wethPriceFeedAddress
         ).getTokensForValue(debtToCover);
         uint256 bonus = amountCollateralToLiquidate * (10 ** (PRECISION - 1)) / PRECISION_FACTOR;
         uint256 bonusInSFToken =  AggregatorV3Interface($.deployConfig.wethPriceFeedAddress).getTokenValue(bonus);
-        assertEq(endingLiquidatorWethBalance, startingLiquidatorWethBalance + startingUserAmountDeposited);
-        assertEq(endingLiquidatorSFBalance, startingLiquidatorSFBalance - debtToCover + bonusInSFToken);
-        assertEq(endingEngineWethBalance, startingEngineWethBalance - startingUserAmountDeposited);
+        assertEq(weth.balanceOf(liquidator), startingLiquidatorWethBalance + startingUserAmountDeposited);
+        assertEq($.sfToken.balanceOf(liquidator), startingLiquidatorSFBalance - debtToCover + bonusInSFToken);
+        assertEq(weth.balanceOf(address($.sfEngine)), startingEngineWethBalance - startingUserAmountDeposited);
         assertEq(startingATokenBalance, endingATokenBalance);
-
-        // Check data
-        assertEq(endingUserAmountDeposited, 0);
-        assertEq(endingLiquidatorAmountDeposited, startingLiquidatorAmountDeposited);
-        assertEq(endingUserAmountMinted, 0);
+        assertEq($.sfEngine.getCollateralAmount(user, address(weth)), 0);
+        assertEq($.sfEngine.getCollateralAmount(liquidator, address(weth)), startingLiquidatorAmountDeposited);
+        assertEq($.sfEngine.getSFDebt(user), 0);
     }
 
     function testHarvestSingleAsset() 
@@ -713,9 +680,6 @@ contract SFEngineTest is Test, Constants {
         vm.recordLogs();
         $.sfEngine.harvest(asset, type(uint256).max);
         
-        uint256 endingEngineCollateralBalance = IERC20(asset).balanceOf(address($.sfEngine));
-        uint256 endingUserCollateralAmount = $.sfEngine.getCollateralAmount(user, asset);
-        uint256 endingInvestmentGain = $.sfEngine.getInvestmentGain(asset);
         (uint256 endingATokenBalance, , , , , , , , ) = IPoolDataProvider(
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(asset, address($.sfEngine)); 
@@ -727,9 +691,9 @@ contract SFEngineTest is Test, Constants {
         interest = uint256(log.topics[3]);
 
         assertEq(amountWithdrawn - interest, amountInvested);
-        assertEq(endingEngineCollateralBalance, startingEngineCollateralBalance + amountWithdrawn);
-        assertEq(endingUserCollateralAmount, startingUserCollateralAmount);
-        assertEq(endingInvestmentGain, staringInvestmentGain + interest);
+        assertEq(IERC20(asset).balanceOf(address($.sfEngine)), startingEngineCollateralBalance + amountWithdrawn);
+        assertEq($.sfEngine.getCollateralAmount(user, asset), startingUserCollateralAmount);
+        assertEq($.sfEngine.getInvestmentGain(asset), staringInvestmentGain + interest);
         assertEq(endingATokenBalance, startingATokenBalance + interest - amountWithdrawn);
     }
 
@@ -768,20 +732,12 @@ contract SFEngineTest is Test, Constants {
         vm.prank($.sfEngine.owner());
         $.sfEngine.harvestAll();
         
-        uint256 endingEngineWethBalance = IERC20(weth).balanceOf(address($.sfEngine));
-        uint256 endingUserWethAmount = $.sfEngine.getCollateralAmount(user, weth);
-        uint256 endingWethInvestmentGain = $.sfEngine.getInvestmentGain(weth);
         (uint256 endingAWethTokenBalance, , , , , , , , ) = IPoolDataProvider(
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(weth, address($.sfEngine)); 
-
-        uint256 endingEngineWbtcBalance = IERC20(wbtc).balanceOf(address($.sfEngine));
-        uint256 endingUserWbtcAmount = $.sfEngine.getCollateralAmount(user, wbtc);
-        uint256 endingWbtcInvestmentGain = $.sfEngine.getInvestmentGain(wbtc);
         (uint256 endingAWbtcTokenBalance, , , , , , , , ) = IPoolDataProvider(
             $.deployConfig.aaveDataProviderAddress
         ).getUserReserveData(wbtc, address($.sfEngine));
-        
         uint256 wethAmountWithdrawn;
         uint256 wethInterest;
         uint256 wbtcAmountWithdrawn;
@@ -803,12 +759,12 @@ contract SFEngineTest is Test, Constants {
 
         assertEq(wethAmountWithdrawn - wethInterest, amountInvested);
         assertEq(wbtcAmountWithdrawn - wbtcInterest, amountInvested);
-        assertEq(endingEngineWethBalance, startingEngineWethBalance + wethAmountWithdrawn);
-        assertEq(endingEngineWbtcBalance, startingEngineBtcBalance + wbtcAmountWithdrawn);
-        assertEq(endingUserWethAmount, startingUserWethAmount);
-        assertEq(endingUserWbtcAmount, startingUserBtcAmount);
-        assertEq(endingWethInvestmentGain, staringWethInvestmentGain + wethInterest);
-        assertEq(endingWbtcInvestmentGain, staringWbtcInvestmentGain + wbtcInterest);
+        assertEq(IERC20(weth).balanceOf(address($.sfEngine)), startingEngineWethBalance + wethAmountWithdrawn);
+        assertEq($.sfEngine.getCollateralAmount(user, weth), startingUserWethAmount);
+        assertEq(IERC20(wbtc).balanceOf(address($.sfEngine)), startingEngineBtcBalance + wbtcAmountWithdrawn);
+        assertEq($.sfEngine.getCollateralAmount(user, wbtc), startingUserBtcAmount);
+        assertEq($.sfEngine.getInvestmentGain(weth), staringWethInvestmentGain + wethInterest);
+        assertEq($.sfEngine.getInvestmentGain(wbtc), staringWbtcInvestmentGain + wbtcInterest);
         assertEq(endingAWethTokenBalance, startingAWethBalance + wethInterest - wethAmountWithdrawn);
         assertEq(endingAWbtcTokenBalance, startingAWbtcBalance + wbtcInterest - wbtcAmountWithdrawn);
         assertEq($.sfEngine.getAllInvestmentGainInUsd(), wethInvestGainInUsd + wbtcInvestGainInUsd);
