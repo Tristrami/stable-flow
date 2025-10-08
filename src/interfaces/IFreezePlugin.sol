@@ -79,4 +79,11 @@ interface IFreezePlugin {
      * @return bool True if account is frozen, false otherwise
      */
     function isFrozen() external view returns (bool);
+
+    /**
+     * @dev Returns the complete history of account freeze/unfreeze events
+     * @notice Provides transparent audit trail of all freeze operations
+     * @return FreezeRecord[] Array of freeze records containing:
+     */
+    function getFreezeRecords() external view returns (FreezeRecord[] memory);
 }

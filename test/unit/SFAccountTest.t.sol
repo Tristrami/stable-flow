@@ -22,6 +22,7 @@ import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/Upgradeabl
 import {IPool} from "@aave/contracts/interfaces/IPool.sol";
 import {Ownable} from "@aave/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
 import {IEntryPoint} from "account-abstraction/contracts/interfaces/IEntryPoint.sol";
+import {BaseAccount} from "account-abstraction/contracts/core/BaseAccount.sol";
 import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
 import "../../script/UserOperations.s.sol";
 
@@ -282,7 +283,7 @@ contract SFAccountTest is Test, Constants {
     /*                              Create SF Account                             */
     /* -------------------------------------------------------------------------- */
 
-    function test_RevertWhen_InitializeSFAccountFactoryWithZeroMaxAccountAmount() localTest public {
+    function test_Create_RevertWhen_InitializeSFAccountFactoryWithZeroMaxAccountAmount() localTest public {
         SFAccountFactory factory = new SFAccountFactory();
         vm.expectRevert(SFAccountFactory.SFAccountFactory__MaxAccountAmountCanNotBeZero.selector);
         factory.initialize(
@@ -300,7 +301,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_RevertWhen_ReinitializeSFAccountFactoryWithZeroMaxAccountAmount() localTest public {
+    function test_Create_RevertWhen_ReinitializeSFAccountFactoryWithZeroMaxAccountAmount() localTest public {
         SFAccountFactory factory = new SFAccountFactory();
         factory.initialize(
             $.deployConfig.entryPointAddress,
@@ -329,7 +330,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_RevertWhen_AccountAmountExceedsMaxAmount() localTest public {
+    function test_Create_RevertWhen_AccountAmountExceedsMaxAmount() localTest public {
         address owner = $.deployConfig.account;
         uint256 maxAccountAmount = $.sfAccountFactory.getMaxAccountAmount();
         IVaultPlugin.CustomVaultConfig memory vaultConfig = IVaultPlugin.CustomVaultConfig({
@@ -356,7 +357,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccountFactory.createSFAccount(owner, salt, vaultConfig, recoveryConfig);
     }
 
-    function testCreateAccount() public localTest {
+    function test_Create_CreateAccount() public localTest {
         address owner = $.deployConfig.account;
         address calculatedAccountAddress = $.sfAccountFactory.calculateAccountAddress(
             address($.sfAccountBeacon), 
@@ -377,15 +378,94 @@ contract SFAccountTest is Test, Constants {
             address($.sfAccountBeacon)
         );
         address[] memory storedSfAccounts = $.sfAccountFactory.getUserAccounts(owner);
+        ISFAccount sfAccount = ISFAccount(storedSfAccounts[0]);
         assertEq(storedSfAccounts.length, 1);
         assertEq(storedSfAccounts[0], calculatedAccountAddress);
+        assertEq(sfAccount.getOwner(), owner);
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                           Execute / Execute Batch                          */
+    /* -------------------------------------------------------------------------- */
+
+    function test_Execute_Revert() public localTest accountCreated {
+        vm.expectRevert(ISFAccount.ISFAccount__OperationNotSupported.selector);
+        $.sfAccount.execute(address(0), 0, "");
+    }
+
+    function test_ExecuteBatch_Revert() public localTest accountCreated {
+        vm.expectRevert(ISFAccount.ISFAccount__OperationNotSupported.selector);
+        $.sfAccount.executeBatch(new BaseAccount.Call[](0));
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                              Freeze / Unfreeze                             */
+    /* -------------------------------------------------------------------------- */
+
+    function test_Freeze_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        $.sfAccount.freeze();
+    }
+
+    function test_Freeze_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.freeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
+        $.sfAccount.freeze();
+        vm.stopPrank();
+    }
+
+    function test_Freeze_FreezeAccount() public localTest accountCreated {
+        vm.expectEmit(true, false, false, false);
+        emit IFreezePlugin.IFreezePlugin__FreezeAccount(address($.sfAccount));
+        vm.prank($.deployConfig.entryPointAddress);
+        $.sfAccount.freeze();
+        IFreezePlugin.FreezeRecord[] memory records = $.sfAccount.getFreezeRecords();
+        IFreezePlugin.FreezeRecord memory latestRecord = records[records.length - 1];
+        assertEq($.sfAccount.isFrozen(), true);
+        assertEq(latestRecord.frozenBy, address($.sfAccount));
+        assertEq(latestRecord.unfrozenBy, address(0));
+        assertEq(latestRecord.isUnfozen, false);
+    }
+
+    function test_Unfreeze_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+        vm.expectRevert(abi.encode("account: not from EntryPoint"));
+        $.sfAccount.unfreeze();
+    }
+
+    function test_Unfreeze_RevertWhen_AccountIsUnfrozen() public localTest accountCreated {
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.freeze();
+        $.sfAccount.unfreeze();
+        vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsNotFrozen.selector);
+        $.sfAccount.unfreeze();
+        vm.stopPrank();
+    }
+
+    function test_Unfreeze_UnfreezeAccount() public localTest accountCreated {
+        vm.startPrank($.deployConfig.entryPointAddress);
+        $.sfAccount.freeze();
+        vm.expectEmit(true, false, false, false);
+        emit IFreezePlugin.IFreezePlugin__UnfreezeAccount(address($.sfAccount));
+        $.sfAccount.unfreeze();
+        vm.stopPrank();
+        IFreezePlugin.FreezeRecord[] memory records = $.sfAccount.getFreezeRecords();
+        IFreezePlugin.FreezeRecord memory latestRecord = records[records.length - 1];
+        assertEq($.sfAccount.isFrozen(), false);
+        assertEq(latestRecord.frozenBy, address($.sfAccount));
+        assertEq(latestRecord.unfrozenBy, address($.sfAccount));
+        assertEq(latestRecord.isUnfozen, true);
     }
 
     /* -------------------------------------------------------------------------- */
     /*                         Update Custom Vault Config                         */
     /* -------------------------------------------------------------------------- */
 
-    function test_RevertWhen_TopUpThresholdLessThanMinCollateralRatio() public localTest accountCreated {
+    function test_UpdateVault_RevertWhen_TopUpThresholdLessThanMinCollateralRatio() 
+        public 
+        localTest 
+        accountCreated 
+    {
         uint256 autoTopUpThreshold = 1 * PRECISION_FACTOR;
         IVaultPlugin.CustomVaultConfig memory customConfig = IVaultPlugin.CustomVaultConfig({
             autoTopUpEnabled: true,
@@ -403,7 +483,11 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.updateCustomVaultConfig(customConfig);
     }
 
-    function test_RevertWhen_CustomCollateralRatioLessThanMinCollateralRatio() public localTest accountCreated {
+    function test_UpdateVault_RevertWhen_CustomCollateralRatioLessThanMinCollateralRatio() 
+        public 
+        localTest 
+        accountCreated 
+    {
         uint256 collateralRatio = 1 * PRECISION_FACTOR;
         IVaultPlugin.CustomVaultConfig memory customConfig = IVaultPlugin.CustomVaultConfig({
             autoTopUpEnabled: true,
@@ -421,7 +505,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.updateCustomVaultConfig(customConfig);
     }
 
-    function testUpdateCustomVaultConfig() public localTest accountCreated {
+    function test_UpdateVault_UpdateCustomVaultConfig() public localTest accountCreated {
         bool autoTopUpEnabled = false;
         uint256 collateralRatio = 4 * PRECISION_FACTOR;
         uint256 autoTopUpThreshold = collateralRatio;

@@ -240,6 +240,11 @@ interface ISFEngine {
      */
     function liquidate(address user, address collateralAddress, uint256 debtToCover) external returns (uint256);
 
+    /**
+     * @dev Returns the current bonus rate for liquidations
+     * @dev The bonus rate determines the additional collateral percentage awarded to liquidators
+     * @return uint256 The current bonus rate in RAY units (1e27 = 100%)
+     */
     function getBonusRate() external view returns (uint256);
 
     /**

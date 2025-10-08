@@ -69,17 +69,23 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
 
     /// @inheritdoc IFreezePlugin
     function freeze() external override onlyEntryPoint {
-        _freezeAccount(owner());
+        _freezeAccount(address(this));
     }
 
     /// @inheritdoc IFreezePlugin
     function unfreeze() external override onlyEntryPoint {
-        _unfreezeAccount(owner());
+        _unfreezeAccount(address(this));
     }
 
     /// @inheritdoc IFreezePlugin
     function isFrozen() public view override returns (bool) {
         return _isFrozen();
+    }
+
+    /// @inheritdoc IFreezePlugin
+    function getFreezeRecords() external view override returns (FreezeRecord[] memory) {
+        FreezePluginStorage storage $ = _getFreezePluginStorage();
+        return $.freezeRecords;
     }
 
     /* -------------------------------------------------------------------------- */
