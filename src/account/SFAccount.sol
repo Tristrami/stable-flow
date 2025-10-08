@@ -70,6 +70,8 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
         address _entryPointAddress,
         address _sfEngineAddress,
         address _accountFactoryAddress,
+        address _automationRegistrarAddress,
+        address _linkTokenAddress,
         VaultConfig memory _vaultConfig,
         CustomVaultConfig memory _customVaultConfig,
         RecoveryConfig memory _recoveryConfig,
@@ -83,7 +85,9 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
             _vaultConfig,
             _customVaultConfig, 
             ISFEngine(_sfEngineAddress), 
-            ISFEngine(_sfEngineAddress).getSFTokenAddress()
+            ISFEngine(_sfEngineAddress).getSFTokenAddress(),
+            _automationRegistrarAddress,
+            _linkTokenAddress
         );
         __SocialRecoveryPlugin_init(
             _recoveryConfig, 

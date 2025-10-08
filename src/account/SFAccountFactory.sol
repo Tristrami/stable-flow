@@ -31,9 +31,11 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
     address private sfEngineAddress;
     address private sfAccountImplementation;
     address private beaconAddress;
+    uint256 private maxAccountAmount;
+    address private automationRegistrarAddress;
+    address private linkTokenAddress;
     IVaultPlugin.VaultConfig private vaultConfig;
     ISocialRecoveryPlugin.RecoveryConfig private recoveryConfig;
-    uint256 private maxAccountAmount;
     mapping(address user => address[] sfAccounts) private userAccounts;
 
     function initialize(
@@ -41,6 +43,8 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
         address _sfEngineAddress,
         address _beaconAddress,
         uint256 _maxAccountAmount,
+        address _automationRegistrarAddress,
+        address _linkTokenAddress,
         IVaultPlugin.VaultConfig memory _vaultConfig,
         ISocialRecoveryPlugin.RecoveryConfig memory _recoveryConfig
     ) external initializer {
@@ -55,6 +59,8 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
             revert SFAccountFactory__MaxAccountAmountCanNotBeZero();
         }
         maxAccountAmount = _maxAccountAmount;
+        automationRegistrarAddress = _automationRegistrarAddress;
+        linkTokenAddress = _linkTokenAddress;
     }
 
     function reinitialize(
@@ -88,6 +94,8 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
             entryPointAddress,
             sfEngineAddress,
             address(this),
+            automationRegistrarAddress,
+            linkTokenAddress,
             vaultConfig,
             customVaultConfig,
             recoveryConfig,

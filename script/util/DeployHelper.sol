@@ -31,7 +31,7 @@ contract DeployHelper is Script, Constants {
         uint256 investmentRatio;
         uint256 bonusRate;
         uint256 autoHarvestDuration;
-        address automationRegistryAddress;
+        address automationRegistrarAddress;
         address linkTokenAddress;
         address entryPointAddress;
         uint256 maxUserAccount;
@@ -93,7 +93,7 @@ contract DeployHelper is Script, Constants {
             investmentRatio: 2 * 10 ** (PRECISION - 1), // 0.2
             bonusRate: 1 * 10 ** (PRECISION - 1), // 0.1
             autoHarvestDuration: 7 days,
-            automationRegistryAddress: 0x86EFBD0b6736Bed994962f9797049422A3A8E8Ad,
+            automationRegistrarAddress: 0xb0E49c5D0d05cbc241d68c05BC5BA1d1B7B72976,
             linkTokenAddress: 0x779877A7B0D9E8603169DdbD7836e478b4624789,
             entryPointAddress: 0x305F5521ed2376d19001E65C51e8Ba7895BD01aE,
             maxUserAccount: 10,
@@ -130,7 +130,7 @@ contract DeployHelper is Script, Constants {
             investmentRatio: 2 * 10 ** (PRECISION - 1), // 0.2
             bonusRate: 1 * 10 ** (PRECISION - 1), // 0.1
             autoHarvestDuration: 7 days,
-            automationRegistryAddress: address(0),
+            automationRegistrarAddress: address(0),
             linkTokenAddress: linkToken,
             entryPointAddress: entryPoint,
             maxUserAccount: 10,

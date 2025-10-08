@@ -4,7 +4,7 @@ pragma solidity ^0.8.30;
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
 import {SFToken} from "./SFToken.sol";
 import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
-import {AaveInvestmentIntegration} from "./integrations/AaveInvestmentIntegration.sol";
+import {AaveInvestmentIntegration} from "../libraries/AaveInvestmentIntegration.sol";
 import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";

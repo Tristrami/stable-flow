@@ -11,6 +11,8 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {AutomationRegistrarInterface} from "../../interfaces/AutomationRegistrarInterface.sol";
+import {UpkeepIntegration} from "../../libraries/UpkeepIntegration.sol";
 
 /**
  * @title VaultPlugin
@@ -33,6 +35,7 @@ import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/autom
 abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatible {
 
     using OracleLib for AggregatorV3Interface;
+    using UpkeepIntegration for AutomationRegistrarInterface;
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableMap for EnumerableMap.AddressToAddressMap;
     using ERC165Checker for address;
@@ -67,6 +70,13 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         /// @dev Set of currently deposited collateral tokens
         /// @notice Tracks active collateral positions for the vault
         EnumerableSet.AddressSet depositedCollaterals;
+        /// @dev Address of chainlink upkeep registrar contract
+        address automationRegistrarAddress;
+        /// @dev Address of the Link Token contract
+        address linkTokenAddress;
+        ///  @dev Tracks Chainlink Automation upkeep IDs for each vault
+        ///  @notice Maps vault addresses to their corresponding Chainlink upkeep IDs
+        mapping(address vault => uint256 upkeepId) upkeeps;
     }
 
     /* -------------------------------------------------------------------------- */
@@ -95,11 +105,15 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         VaultConfig memory vaultConfig,
         CustomVaultConfig memory customVaultConfig,
         ISFEngine sfEngine,
-        address sfTokenAddress
+        address sfTokenAddress,
+        address automationRegistrarAddress,
+        address linkTokenAddress
     ) internal onlyInitializing {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         $.sfEngine = sfEngine;
         $.sfTokenAddress = sfTokenAddress;
+        $.automationRegistrarAddress = automationRegistrarAddress;
+        $.linkTokenAddress = linkTokenAddress;
         _updateVaultConfig(vaultConfig);
         _updateCustomVaultConfig(customVaultConfig);
     }
@@ -534,6 +548,15 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     function _updateCustomVaultConfig(CustomVaultConfig memory customConfig) private {
         _checkCustomVaultConfig(customConfig);
         VaultPluginStorage storage $ = _getVaultPluginStorage();
+        if (!$.customVaultConfig.autoTopUpEnabled && customConfig.autoTopUpEnabled) {
+            uint256 upkeepId = $.upkeeps[address(this)];
+            if (upkeepId == 0) {
+                upkeepId = AutomationRegistrarInterface(
+                    $.automationRegistrarAddress
+                ).register(this, $.linkTokenAddress, this.getOwner());
+                $.upkeeps[address(this)] = upkeepId;
+            }
+        }
         $.customVaultConfig = customConfig;
         bytes memory configBytes = abi.encode(customConfig);
         emit IVaultPlugin__UpdateCustomVaultConfig(configBytes);

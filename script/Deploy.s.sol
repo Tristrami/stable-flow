@@ -98,6 +98,8 @@ contract Deploy is Script {
             sfEngine, 
             beacon, 
             deployConfig.maxUserAccount,
+            deployConfig.automationRegistrarAddress,
+            deployConfig.linkTokenAddress,
             deployConfig.vaultConfig, 
             deployConfig.recoveryConfig
         );

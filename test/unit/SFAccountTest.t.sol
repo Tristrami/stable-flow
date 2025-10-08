@@ -291,6 +291,8 @@ contract SFAccountTest is Test, Constants {
             address($.sfEngine),
             address($.sfAccountBeacon), 
             0, 
+            $.deployConfig.automationRegistrarAddress,
+            $.deployConfig.linkTokenAddress,
             IVaultPlugin.VaultConfig({
                 collaterals: new address[](0),
                 priceFeeds: new address[](0)
@@ -307,7 +309,9 @@ contract SFAccountTest is Test, Constants {
             $.deployConfig.entryPointAddress,
             address($.sfEngine),
             address($.sfAccountBeacon), 
-            5, 
+            5,  
+            $.deployConfig.automationRegistrarAddress,
+            $.deployConfig.linkTokenAddress,
             IVaultPlugin.VaultConfig({
                 collaterals: new address[](0),
                 priceFeeds: new address[](0)
