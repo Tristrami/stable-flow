@@ -548,18 +548,31 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     function _updateCustomVaultConfig(CustomVaultConfig memory customConfig) private {
         _checkCustomVaultConfig(customConfig);
         VaultPluginStorage storage $ = _getVaultPluginStorage();
-        if (!$.customVaultConfig.autoTopUpEnabled && customConfig.autoTopUpEnabled) {
-            uint256 upkeepId = $.upkeeps[address(this)];
-            if (upkeepId == 0) {
-                upkeepId = AutomationRegistrarInterface(
-                    $.automationRegistrarAddress
-                ).register(this, $.linkTokenAddress, this.getOwner());
-                $.upkeeps[address(this)] = upkeepId;
-            }
-        }
+        _registerUpkeepIfNecessary(customConfig);
         $.customVaultConfig = customConfig;
         bytes memory configBytes = abi.encode(customConfig);
         emit IVaultPlugin__UpdateCustomVaultConfig(configBytes);
+    }
+
+    function _registerUpkeepIfNecessary(CustomVaultConfig memory customConfig) private {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        bool topUpCurrentlyEnabled = $.customVaultConfig.autoTopUpEnabled;
+        bool shouldEnableTopUp = customConfig.autoTopUpEnabled;
+        if (!topUpCurrentlyEnabled && shouldEnableTopUp) {
+            uint256 upkeepId = $.upkeeps[address(this)];
+            if (upkeepId == 0) {
+                address owner = this.getOwner();
+                upkeepId = AutomationRegistrarInterface($.automationRegistrarAddress).register(
+                    this, 
+                    owner, 
+                    $.linkTokenAddress,
+                    owner,
+                    uint96(customConfig.upkeepLinkAmount),
+                    uint32(customConfig.upkeepGasLimit)
+                );
+                $.upkeeps[address(this)] = upkeepId;
+            }
+        }
     }
 
     function _checkCustomVaultConfig(CustomVaultConfig memory customConfig) private view {

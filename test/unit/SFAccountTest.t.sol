@@ -14,7 +14,7 @@ import {SFToken} from "../../src/token/SFToken.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
 import {Deploy} from "../../script/Deploy.s.sol";
 import {Constants} from "../../script/util/Constants.sol";
-import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
+import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {Logs} from "../../script/util/Logs.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -110,6 +110,36 @@ contract SFAccountTest is Test, Constants {
     );
 
     /* -------------------------------------------------------------------------- */
+    /*                         Automation Registrar Events                        */
+    /* -------------------------------------------------------------------------- */
+
+    event RegistrationRequested(
+        bytes32 indexed hash,
+        string name,
+        bytes encryptedEmail,
+        address indexed upkeepContract,
+        uint32 gasLimit,
+        address adminAddress,
+        uint8 triggerType,
+        bytes triggerConfig,
+        bytes offchainConfig,
+        bytes checkData,
+        uint96 amount
+    );
+
+    /* -------------------------------------------------------------------------- */
+    /*                          UpkeepIntegration Events                          */
+    /* -------------------------------------------------------------------------- */
+    
+    event UpkeepIntegration__Register(
+        uint256 indexed upkeepId, 
+        address indexed registrar, 
+        address indexed vault, 
+        uint96 linkAmount,
+        uint32 gasLimit
+    );
+
+    /* -------------------------------------------------------------------------- */
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
@@ -137,7 +167,7 @@ contract SFAccountTest is Test, Constants {
     /*                               State Variables                              */
     /* -------------------------------------------------------------------------- */
 
-    address private user = vm.rememberKey(0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d);
+    address private user = vm.rememberKey(0x92db14e403b83dfe3df233f83dfa3a0d7096f21ca9b0d6d6b8d88b2b4ec1564e);
     address private guardian1 = vm.rememberKey(0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6);
     address private guardian2 = vm.rememberKey(0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97);
     address private guardian3 = vm.rememberKey(0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356);
@@ -159,7 +189,11 @@ contract SFAccountTest is Test, Constants {
     }
 
     modifier accountCreated() {
-        address sfAccountAddress = _createSFAccount($.deployConfig.account);
+        address sfAccountAddress = $.sfAccountFactory.calculateAccountAddress(
+            address($.sfAccountBeacon), 
+            $.deployConfig.account
+        );
+        _createSFAccount($.deployConfig.account);
         $.sfAccount = SFAccount(sfAccountAddress);
         _;
     }
@@ -221,15 +255,13 @@ contract SFAccountTest is Test, Constants {
         localData.deployConfig = deployConfig;
         IERC20 weth = IERC20(localData.deployConfig.wethTokenAddress);
         IERC20 wbtc = IERC20(localData.deployConfig.wbtcTokenAddress);
-        vm.startPrank(address(deployer));
+        IERC20 link = IERC20(localData.deployConfig.linkTokenAddress);
+        vm.startPrank(deployConfig.account);
         weth.transfer(user, INITIAL_USER_BALANCE);
         wbtc.transfer(user, INITIAL_USER_BALANCE);
-        weth.transfer(user, INITIAL_USER_BALANCE);
-        wbtc.transfer(user, INITIAL_USER_BALANCE);
-        weth.transfer(deployConfig.account, INITIAL_USER_BALANCE);
-        wbtc.transfer(deployConfig.account, INITIAL_USER_BALANCE);
+        link.transfer(user, INITIAL_USER_BALANCE);
         vm.stopPrank();
-        vm.deal(localData.deployConfig.account, INITIAL_BALANCE);
+        vm.deal(deployConfig.account, INITIAL_BALANCE);
     }
 
     function _setUpEthSepolia() private {
@@ -247,8 +279,8 @@ contract SFAccountTest is Test, Constants {
         sepoliaData.sfAccountFactory = SFAccountFactory(sfAccountFactoryAddress);
         sepoliaData.sfAccountBeacon = UpgradeableBeacon(sfAccountBeaconAddress);
         sepoliaData.deployConfig = deployConfig;
-        ERC20Mock weth = ERC20Mock(sepoliaData.deployConfig.wethTokenAddress);
-        ERC20Mock wbtc = ERC20Mock(sepoliaData.deployConfig.wbtcTokenAddress);
+        MockERC20 weth = MockERC20(sepoliaData.deployConfig.wethTokenAddress);
+        MockERC20 wbtc = MockERC20(sepoliaData.deployConfig.wbtcTokenAddress);
         vm.startPrank(Ownable(sepoliaData.deployConfig.wethTokenAddress).owner());
         weth.mint(user, INITIAL_USER_BALANCE);
         weth.mint(user, 2 * INITIAL_USER_BALANCE);
@@ -340,7 +372,9 @@ contract SFAccountTest is Test, Constants {
         IVaultPlugin.CustomVaultConfig memory vaultConfig = IVaultPlugin.CustomVaultConfig({
             autoTopUpEnabled: false,
             autoTopUpThreshold: 0,
-            collateralRatio: 2 * PRECISION_FACTOR
+            collateralRatio: 2 * PRECISION_FACTOR,
+            upkeepLinkAmount: 0,
+            upkeepGasLimit: 0
         });
         ISocialRecoveryPlugin.CustomRecoveryConfig memory recoveryConfig = ISocialRecoveryPlugin.CustomRecoveryConfig({
             guardians: new address[](0),
@@ -361,12 +395,16 @@ contract SFAccountTest is Test, Constants {
         $.sfAccountFactory.createSFAccount(owner, salt, vaultConfig, recoveryConfig);
     }
 
-    function test_Create_CreateAccount() public localTest {
+    function test_Create_CreateAccount() public ethSepoliaTest {
         address owner = $.deployConfig.account;
         address calculatedAccountAddress = $.sfAccountFactory.calculateAccountAddress(
             address($.sfAccountBeacon), 
-            $.sfAccountFactory.getSFAccountSalt(owner)
+            owner
         );
+        IERC20 link = IERC20($.deployConfig.linkTokenAddress);
+        vm.startPrank(owner);
+        link.approve(calculatedAccountAddress, link.balanceOf(owner));
+        vm.stopPrank();
         CreateAccount createAccount = new CreateAccount();
         vm.deal(owner, owner.balance + 1 ether);
         vm.prank(owner);
@@ -474,7 +512,9 @@ contract SFAccountTest is Test, Constants {
         IVaultPlugin.CustomVaultConfig memory customConfig = IVaultPlugin.CustomVaultConfig({
             autoTopUpEnabled: true,
             autoTopUpThreshold: autoTopUpThreshold,
-            collateralRatio: 2 * PRECISION_FACTOR
+            collateralRatio: 2 * PRECISION_FACTOR,
+            upkeepLinkAmount: 0,
+            upkeepGasLimit: 0
         });
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -496,7 +536,9 @@ contract SFAccountTest is Test, Constants {
         IVaultPlugin.CustomVaultConfig memory customConfig = IVaultPlugin.CustomVaultConfig({
             autoTopUpEnabled: true,
             autoTopUpThreshold: 2 * PRECISION_FACTOR,
-            collateralRatio: collateralRatio
+            collateralRatio: collateralRatio,
+            upkeepLinkAmount: 0,
+            upkeepGasLimit: 0
         });
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -509,15 +551,16 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.updateCustomVaultConfig(customConfig);
     }
 
-    function test_UpdateVault_UpdateCustomVaultConfig() public localTest accountCreated {
-        bool autoTopUpEnabled = false;
+    function test_UpdateVault_DisableAutoTopUp() public ethSepoliaTest accountCreated {
         uint256 collateralRatio = 4 * PRECISION_FACTOR;
         uint256 autoTopUpThreshold = collateralRatio;
         IVaultPlugin.CustomVaultConfig memory config = $.sfAccount.getCustomVaultConfig();
-        config.autoTopUpEnabled = autoTopUpEnabled;
+        config.autoTopUpEnabled = false;
         config.collateralRatio = collateralRatio;
         config.autoTopUpThreshold = autoTopUpThreshold;
         UpdateCustomVaultConfig updateCustomVaultConfig = new UpdateCustomVaultConfig();
+        vm.expectEmit(false, false, false, true);
+        emit IVaultPlugin__UpdateCustomVaultConfig(abi.encode(config));
         updateCustomVaultConfig.run(
             address($.sfAccountFactory),
             $.deployConfig.entryPointAddress,
@@ -526,9 +569,73 @@ contract SFAccountTest is Test, Constants {
             config
         );
         IVaultPlugin.CustomVaultConfig memory updatedConfig = $.sfAccount.getCustomVaultConfig();
-        assertEq(updatedConfig.autoTopUpEnabled, autoTopUpEnabled);
+        assertEq(updatedConfig.autoTopUpEnabled, false);
         assertEq(updatedConfig.collateralRatio, collateralRatio);
         assertEq(updatedConfig.autoTopUpThreshold, autoTopUpThreshold);
+    }
+
+    function test_UpdateVault_EnableAutoTopUp() public ethSepoliaTest {
+        address owner = $.deployConfig.account;
+        uint256 collateralRatio = 4 * PRECISION_FACTOR;
+        uint256 autoTopUpThreshold = collateralRatio;
+        uint96 upkeepLinkAmount = 1 ether;
+        uint32 upkeepGasLimit = 300000;
+
+        IVaultPlugin.CustomVaultConfig memory vaultConfig = IVaultPlugin.CustomVaultConfig({
+            autoTopUpEnabled: false,
+            autoTopUpThreshold: 2 * PRECISION_FACTOR,
+            collateralRatio: 2 * PRECISION_FACTOR,
+            upkeepLinkAmount: 2 ether,
+            upkeepGasLimit: 200000
+        });
+        ISocialRecoveryPlugin.CustomRecoveryConfig memory recoveryConfig = ISocialRecoveryPlugin.CustomRecoveryConfig({
+            guardians: new address[](0),
+            minGuardianApprovals: 0,
+            recoveryTimeLock: 0,
+            socialRecoveryEnabled: false
+        });
+
+        vm.prank($.deployConfig.entryPointAddress);
+        bytes32 salt = $.sfAccountFactory.getSFAccountSalt(owner);
+        address sfAccountAddress = $.sfAccountFactory.createSFAccount(owner, salt, vaultConfig, recoveryConfig);
+        SFAccount sfAccount = SFAccount(sfAccountAddress);
+        IEntryPoint($.deployConfig.entryPointAddress).depositTo{value: 1 ether}(sfAccountAddress);
+
+        vm.startPrank(owner);
+        IERC20 link = IERC20($.deployConfig.linkTokenAddress);
+        link.approve(sfAccountAddress, link.balanceOf(owner));
+        vm.stopPrank();
+
+        vaultConfig.autoTopUpEnabled = true;
+        vaultConfig.collateralRatio = collateralRatio;
+        vaultConfig.autoTopUpThreshold = autoTopUpThreshold;
+        vaultConfig.upkeepLinkAmount = upkeepLinkAmount;
+        vaultConfig.upkeepGasLimit = upkeepGasLimit;
+
+        UpdateCustomVaultConfig updateCustomVaultConfig = new UpdateCustomVaultConfig();
+        vm.expectEmit(false, true, true, true);
+        emit UpkeepIntegration__Register(
+            0,
+            $.deployConfig.automationRegistrarAddress,
+            sfAccountAddress,
+            uint96(vaultConfig.upkeepLinkAmount),
+            uint32(vaultConfig.upkeepGasLimit)
+        );
+        vm.expectEmit(false, false, false, true);
+        emit IVaultPlugin__UpdateCustomVaultConfig(abi.encode(vaultConfig));
+        updateCustomVaultConfig.run(
+            address($.sfAccountFactory),
+            $.deployConfig.entryPointAddress,
+            $.deployConfig.account,
+            sfAccountAddress,
+            vaultConfig
+        );
+        IVaultPlugin.CustomVaultConfig memory updatedConfig = sfAccount.getCustomVaultConfig();
+        assertEq(updatedConfig.autoTopUpEnabled, true);
+        assertEq(updatedConfig.collateralRatio, collateralRatio);
+        assertEq(updatedConfig.autoTopUpThreshold, autoTopUpThreshold);
+        assertEq(updatedConfig.upkeepLinkAmount, upkeepLinkAmount);
+        assertEq(updatedConfig.upkeepGasLimit, upkeepGasLimit);
     }
 
     /* -------------------------------------------------------------------------- */
@@ -566,7 +673,7 @@ contract SFAccountTest is Test, Constants {
     }
 
     function test_Deposit_RevertWhen_CollateralNotSupported() public localTest accountCreated {
-        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -647,7 +754,7 @@ contract SFAccountTest is Test, Constants {
     }
 
     function test_Withdraw_RevertWhen_CollateralNotSupported() public localTest accountCreated {
-        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -770,7 +877,7 @@ contract SFAccountTest is Test, Constants {
     }
 
     function test_Invest_RevertWhen_CollateralNotSupported() public localTest accountCreated {
-        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -1051,7 +1158,7 @@ contract SFAccountTest is Test, Constants {
     }
 
     function test_Harvest_RevertWhen_CollateralNotSupported() public localTest accountCreated {
-        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -1230,7 +1337,7 @@ contract SFAccountTest is Test, Constants {
     }
 
     function test_TopUp_RevertWhen_CollateralNotSupported() public localTest accountCreated deposited {
-        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -1447,7 +1554,7 @@ contract SFAccountTest is Test, Constants {
 
     function test_Liquidate_RevertWhen_CollateralNotSupported() public localTest accountCreated deposited {
         address liquidatorAccount = _createSFAccount(user);
-        address collateral = address(new ERC20Mock("test", "test", $.deployConfig.account, 1 ether));
+        address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -2522,6 +2629,9 @@ contract SFAccountTest is Test, Constants {
     /* -------------------------------------------------------------------------- */
 
     function _createSFAccount(address account) private returns (address) {
+        // On sepolia testnet, a create collision error will occur in KeeperRegistryLogicA2_1.registerUpkeep
+        // function while the nonce of KeeperRegistryLogicA2_1 is 1, so clear the code on this collision address
+        vm.etch(0xFc7d18305f17ABf863d8c60CE01a4977d9Bb663c, bytes(""));
         CreateAccount createAccount = new CreateAccount();
         address calculatedAccountAddress = $.sfAccountFactory.calculateAccountAddress(
             address($.sfAccountBeacon), 
@@ -2530,6 +2640,12 @@ contract SFAccountTest is Test, Constants {
         vm.deal(account, account.balance + 1 ether);
         vm.prank(account);
         IEntryPoint($.deployConfig.entryPointAddress).depositTo{value: 1 ether}(calculatedAccountAddress);
+        uint256 initialLinkAmount = 1 * PRECISION_FACTOR;
+        IERC20 link = IERC20($.deployConfig.linkTokenAddress);
+        vm.prank($.deployConfig.account);
+        link.transfer(account, initialLinkAmount);
+        vm.prank(account);
+        link.approve(calculatedAccountAddress, initialLinkAmount);
         return createAccount.run(
             account,
             address($.deployConfig.entryPointAddress),

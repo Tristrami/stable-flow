@@ -3,7 +3,7 @@ pragma solidity ^0.8.30;
 
 import {SFEngine} from "../../../src/token/SFEngine.sol";
 import {SFToken} from "../../../src/token/SFToken.sol";
-import {ERC20Mock} from "../../../test/mocks/ERC20Mock.sol";
+import {MockERC20} from "../../../test/mocks/MockERC20.sol";
 import {Test} from "forge-std/Test.sol";
 import {OracleLib, AggregatorV3Interface} from "../../../src/libraries/OracleLib.sol";
 
@@ -26,7 +26,7 @@ contract ContinueOnRevertHandler is Test {
         bound(amountCollateral, 1, type(uint96).max);
         bound(amountSFToMint, 1, type(uint96).max);
         address collateralAddress = pickRandomAddress(supportedCollaterals, collateralAddressSeed);
-        ERC20Mock token = ERC20Mock(collateralAddress);
+        MockERC20 token = MockERC20(collateralAddress);
         token.mint(msg.sender, amountCollateral);
         // The sender will be this handler contract if without prank
         vm.startPrank(msg.sender);

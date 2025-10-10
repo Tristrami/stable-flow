@@ -15,7 +15,7 @@ contract Constants {
     /*                                Deploy Config                               */
     /* -------------------------------------------------------------------------- */
 
-    /// @dev Initial account balance of ERC20Mock Token
+    /// @dev Initial account balance of MockERC20 Token
     uint256 internal constant INITIAL_BALANCE = 10000 * 10 ** PRECISION;
     /// @dev Initial MockV3Aggregator price feed decimals
     uint8 internal constant PRICE_FEED_DECIMALS = 8;

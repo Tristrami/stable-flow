@@ -2,7 +2,9 @@
   "customVaultConfig": {
     "autoTopUpEnabled": true,
     "autoTopUpThreshold": 2000000000000000000,
-    "collateralRatio": 2000000000000000000
+    "collateralRatio": 2000000000000000000,
+    "upkeepGasLimit": 300000,
+    "upkeepLinkAmount": 1000000000000000000
   },
   "customRecoveryConfig": {
     "guardians": [],

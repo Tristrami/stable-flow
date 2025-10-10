@@ -8,7 +8,7 @@ import {SFToken} from "../../src/token/SFToken.sol";
 import {Deploy} from "../../script/Deploy.s.sol";
 import {Constants} from "../../script/util/Constants.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
-import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
+import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
 import {Logs} from "../../script/util/Logs.sol";
@@ -98,7 +98,7 @@ contract SFEngineTest is Test, Constants {
         localData.deployConfig = deployConfig;
         IERC20 weth = IERC20(localData.deployConfig.wethTokenAddress);
         IERC20 wbtc = IERC20(localData.deployConfig.wbtcTokenAddress);
-        vm.startPrank(address(deployer));
+        vm.startPrank(deployConfig.account);
         weth.transfer(user, INITIAL_USER_BALANCE);
         wbtc.transfer(user, INITIAL_USER_BALANCE);
         weth.transfer(randomUser, INITIAL_USER_BALANCE);
@@ -117,8 +117,8 @@ contract SFEngineTest is Test, Constants {
         sepoliaData.sfEngine = SFEngine(sfEngineAddress);
         sepoliaData.sfToken = SFToken(sfTokenAddress);
         sepoliaData.deployConfig = deployConfig;
-        ERC20Mock weth = ERC20Mock(sepoliaData.deployConfig.wethTokenAddress);
-        ERC20Mock wbtc = ERC20Mock(sepoliaData.deployConfig.wbtcTokenAddress);
+        MockERC20 weth = MockERC20(sepoliaData.deployConfig.wethTokenAddress);
+        MockERC20 wbtc = MockERC20(sepoliaData.deployConfig.wbtcTokenAddress);
         vm.startPrank(Ownable(sepoliaData.deployConfig.wethTokenAddress).owner());
         weth.mint(user, INITIAL_USER_BALANCE);
         weth.mint(randomUser, INITIAL_USER_BALANCE);
@@ -191,7 +191,7 @@ contract SFEngineTest is Test, Constants {
     }
 
     function test_RevertWhen_TokenAddressAndPriceFeedAddressLengthNotMatch() public localTest {
-        ERC20Mock token = new ERC20Mock("TEST", "TEST", msg.sender, 10);
+        MockERC20 token = new MockERC20("TEST", "TEST", msg.sender, 10);
         // Token address length < price feed address length
         tokenAddresses = [address(0)];
         priceFeedAddresses = [address(0), address(1)];
@@ -214,7 +214,7 @@ contract SFEngineTest is Test, Constants {
         vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__AmountCollateralToDepositCanNotBeZero.selector, 0));
         $.sfEngine.depositCollateralAndMintSFToken($.deployConfig.wethTokenAddress, 0 ether, 1 ether);
         // Unsupported token
-        ERC20Mock token = new ERC20Mock("TEST", "TEST", msg.sender, 10);
+        MockERC20 token = new MockERC20("TEST", "TEST", msg.sender, 10);
         vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__CollateralNotSupported.selector, address(token)));
         $.sfEngine.depositCollateralAndMintSFToken(address(token), 1 ether, 1 ether);
     }
@@ -224,7 +224,7 @@ contract SFEngineTest is Test, Constants {
         uint256 amountCollateral = 1 ether;
         uint256 amountToMint =  AggregatorV3Interface($.deployConfig.wethPriceFeedAddress).getTokenValue(amountCollateral);
         uint256 collateralRatio = 1 * PRECISION_FACTOR;
-        ERC20Mock weth = ERC20Mock($.deployConfig.wethTokenAddress);
+        MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
         vm.prank(Ownable(address(weth)).owner());
         weth.mint(user, amountCollateral);
         vm.startPrank(user);
@@ -544,7 +544,7 @@ contract SFEngineTest is Test, Constants {
         ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
-        ERC20Mock weth = ERC20Mock($.deployConfig.wethTokenAddress);
+        MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
         address liquidator = makeAddr("liquidator");
         uint256 debtToCover = 300 ether;
         vm.prank(Ownable(address(weth)).owner());
@@ -604,7 +604,7 @@ contract SFEngineTest is Test, Constants {
         ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
-        ERC20Mock weth = ERC20Mock($.deployConfig.wethTokenAddress);
+        MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
         address liquidator = makeAddr("liquidator");
         uint256 debtToCover = $.sfEngine.getSFDebt(user);
         vm.prank(Ownable(address(weth)).owner());

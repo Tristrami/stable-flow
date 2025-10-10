@@ -109,6 +109,16 @@ interface IVaultPlugin {
         /// @dev The collateral ratio used for investment operations
         /// @notice Must be greater than or equal to the minimum collateral ratio supported by SFEngine
         uint256 collateralRatio;
+        /// @dev Gas limit for Chainlink Automation upkeep executions
+        /// @notice Must be set according to the vault's expected operation complexity
+        /// @notice Typical range: 200,000 - 500,000 gas depending on vault logic
+        /// @notice Only used when creating account
+        uint256 upkeepGasLimit;
+        /// @dev Initial LINK amount required to register a Chainlink Automation upkeep
+        /// @notice This amount will be locked when registering the vault's upkeep
+        /// @notice Value should be in LINK token units (1e18 decimals)
+        /// @notice Only used when creating account
+        uint256 upkeepLinkAmount;
     }
 
     /**

@@ -147,6 +147,10 @@ contract SFAccountFactory is UUPSUpgradeable, OwnableUpgradeable {
         return maxAccountAmount;
     }
 
+    function calculateAccountAddress(address beacon, address deployer) public view returns (address) {
+        return calculateAccountAddress(beacon, getSFAccountSalt(deployer));
+    }
+
     function calculateAccountAddress(
         address beacon,
         bytes32 salt
