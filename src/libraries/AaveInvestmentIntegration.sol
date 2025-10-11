@@ -7,8 +7,8 @@ import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap
 
 /**
  * @title AaveInvestmentIntegration
- * @notice A secure library for integrating with Aave Protocol's lending pool
  * @dev Provides investment and withdrawal functions with built-in safety checks
+ * @notice A secure library for integrating with Aave Protocol's lending pool
  */
 library AaveInvestmentIntegration {
 
