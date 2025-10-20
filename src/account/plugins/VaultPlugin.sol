@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {FreezePlugin} from "./FreezePlugin.sol";
 import {IVaultPlugin} from "../../interfaces/IVaultPlugin.sol";
@@ -74,8 +74,8 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         address automationRegistrarAddress;
         /// @dev Address of the Link Token contract
         address linkTokenAddress;
-        ///  @dev Tracks Chainlink Automation upkeep IDs for each vault
-        ///  @notice Maps vault addresses to their corresponding Chainlink upkeep IDs
+        /// @dev Tracks Chainlink Automation upkeep IDs for each vault
+        /// @notice Maps vault addresses to their corresponding Chainlink upkeep IDs
         mapping(address vault => uint256 upkeepId) upkeeps;
     }
 

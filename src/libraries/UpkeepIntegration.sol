@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {AutomationRegistrarInterface} from "../interfaces/AutomationRegistrarInterface.sol";
 import {IVaultPlugin} from "../interfaces/IVaultPlugin.sol";

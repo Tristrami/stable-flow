@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {SFEngine} from "../../../src/token/SFEngine.sol";
 import {SFToken} from "../../../src/token/SFToken.sol";

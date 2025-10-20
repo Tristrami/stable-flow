@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {IFreezePlugin} from "../../interfaces/IFreezePlugin.sol";
 import {BaseSFAccountPlugin} from "./BaseSFAccountPlugin.sol";

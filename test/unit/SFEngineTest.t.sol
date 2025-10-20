@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {Test, Vm, console2} from "forge-std/Test.sol";
 import {ISFEngine} from "../../src/interfaces/ISFEngine.sol";
 import {SFEngine} from "../../src/token/SFEngine.sol";
 import {SFToken} from "../../src/token/SFToken.sol";
-import {Deploy} from "../../script/Deploy.s.sol";
+import {DeployOnMainChain} from "../../script/DeployOnMainChain.s.sol";
 import {Constants} from "../../script/util/Constants.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
 import {MockERC20} from "../../test/mocks/MockERC20.sol";
@@ -14,8 +14,8 @@ import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.so
 import {Logs} from "../../script/util/Logs.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolDataProvider} from "aave-address-book/src/AaveV3.sol";
-import {IPool} from "@aave/contracts/interfaces/IPool.sol";
-import {Ownable} from "@aave/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
+import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
+import {Ownable} from "@aave/v3/core/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
 
 contract SFEngineTest is Test, Constants {
 
@@ -87,10 +87,10 @@ contract SFEngineTest is Test, Constants {
 
     function _setUpLocal() private {
         localData.forkId = vm.createSelectFork("local");
-        Deploy deployer = new Deploy();
+        DeployOnMainChain deployer = new DeployOnMainChain();
         (
             address sfTokenAddress, 
-            address sfEngineAddress, , ,
+            address sfEngineAddress, , , , ,
             DeployHelper.DeployConfig memory deployConfig
         ) = deployer.deploy();
         localData.sfEngine = SFEngine(sfEngineAddress);
@@ -108,10 +108,10 @@ contract SFEngineTest is Test, Constants {
 
     function _setUpEthSepolia() private {
         sepoliaData.forkId = vm.createSelectFork("ethSepolia");
-        Deploy deployer = new Deploy();
+        DeployOnMainChain deployer = new DeployOnMainChain();
         (
             address sfTokenAddress, 
-            address sfEngineAddress, , ,
+            address sfEngineAddress, , , , ,
             DeployHelper.DeployConfig memory deployConfig
         ) = deployer.deploy();
         sepoliaData.sfEngine = SFEngine(sfEngineAddress);
@@ -143,6 +143,32 @@ contract SFEngineTest is Test, Constants {
             randomUser, 
             0
         );
+        vm.stopPrank();
+    }
+
+    function test_SFEngineIsMinter() public localTest {
+        assertTrue($.sfToken.isMinter(address($.sfEngine)));
+    }
+
+    function test_MinterCanMintAndBurn() public localTest {
+        address minter = address($.sfEngine);
+        uint256 amount = 1 * PRECISION_FACTOR;
+        uint256 startingSFBalance = $.sfToken.balanceOf(user);
+        vm.startPrank(minter);
+        $.sfToken.mint(user, amount);
+        assertEq($.sfToken.balanceOf(user), startingSFBalance + amount);
+        $.sfToken.burn(user, amount);
+        assertEq($.sfToken.balanceOf(user), startingSFBalance);
+        vm.stopPrank();
+    }
+
+    function test_RevertWhen_RandomUserMintAndBurnSFToken() public localTest {
+        uint256 amount = 1 * PRECISION_FACTOR;
+        vm.startPrank(randomUser);
+        vm.expectRevert(SFToken.SFToken__OnlyMinter.selector);
+        $.sfToken.mint(user, amount);
+        vm.expectRevert(SFToken.SFToken__OnlyMinter.selector);
+        $.sfToken.burn(user, amount);
         vm.stopPrank();
     }
 
@@ -328,7 +354,7 @@ contract SFEngineTest is Test, Constants {
         uint256 sfBalance = $.sfToken.balanceOf(user);
         uint256 sfToBurn = sfBalance + 1 * PRECISION_FACTOR;
         // Mint some sf to user to make sure the sf balance is enough
-        vm.prank($.sfToken.owner());
+        vm.prank(address($.sfEngine));
         $.sfToken.mint(user, 1 * PRECISION_FACTOR);
         vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__DebtToCoverExceedsUserDebt.selector, sfToBurn, sfBalance));
         vm.prank(user);
@@ -772,7 +798,7 @@ contract SFEngineTest is Test, Constants {
 
 
     function testCalculateStorageLocation() public localTest {
-        bytes memory name = "stableflow.storage.FreezePlugin";
+        bytes memory name = "stableflow.storage.BridgePlugin";
         bytes32 b = keccak256(abi.encode(uint256(keccak256(name)) - 1)) & ~bytes32(uint256(0xff));
         console2.logBytes32(b);
     }

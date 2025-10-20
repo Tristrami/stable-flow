@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {Vm} from "forge-std/Vm.sol";
 import {Test, console2} from "forge-std/Test.sol";
@@ -12,15 +12,15 @@ import {SFAccount} from "../../src/account/SFAccount.sol";
 import {SFAccountFactory} from "../../src/account/SFAccountFactory.sol";
 import {SFToken} from "../../src/token/SFToken.sol";
 import {DeployHelper} from "../../script/util/DeployHelper.sol";
-import {Deploy} from "../../script/Deploy.s.sol";
+import {DeployOnMainChain} from "../../script/DeployOnMainChain.s.sol";
 import {Constants} from "../../script/util/Constants.sol";
 import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {Logs} from "../../script/util/Logs.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
-import {IPool} from "@aave/contracts/interfaces/IPool.sol";
-import {Ownable} from "@aave/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
+import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
+import {Ownable} from "@aave/v3/core/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
 import {IEntryPoint} from "account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {BaseAccount} from "account-abstraction/contracts/core/BaseAccount.sol";
 import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
@@ -240,10 +240,10 @@ contract SFAccountTest is Test, Constants {
 
     function _setUpLocal() private {
         localData.forkId = vm.createSelectFork("local");
-        Deploy deployer = new Deploy();
+        DeployOnMainChain deployer = new DeployOnMainChain();
         (
             address sfTokenAddress, 
-            address sfEngineAddress, 
+            address sfEngineAddress, , ,
             address sfAccountFactoryAddress,
             address sfAccountBeaconAddress,
             DeployHelper.DeployConfig memory deployConfig
@@ -266,10 +266,10 @@ contract SFAccountTest is Test, Constants {
 
     function _setUpEthSepolia() private {
         sepoliaData.forkId = vm.createSelectFork("ethSepolia");
-        Deploy deployer = new Deploy();
+        DeployOnMainChain deployer = new DeployOnMainChain();
         (
             address sfTokenAddress, 
-            address sfEngineAddress, 
+            address sfEngineAddress, , ,
             address sfAccountFactoryAddress,
             address sfAccountBeaconAddress,
             DeployHelper.DeployConfig memory deployConfig

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {BaseTest} from "../../BaseTest.t.sol";
 import {FailOnRevertHandler} from "./FailOnRevertHandler.t.sol";

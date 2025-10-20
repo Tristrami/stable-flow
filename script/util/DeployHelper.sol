@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {Script} from "forge-std/Script.sol";
-import {DevOps} from "./DevOps.s.sol";
+import {ConfigHelper} from "./ConfigHelper.sol";
 import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {MockAutomationRegistrar} from "../../test/mocks/MockAutomationRegistrar.sol";
@@ -10,9 +10,9 @@ import {Constants} from "./Constants.sol";
 import {IVaultPlugin} from "../../src/interfaces/IVaultPlugin.sol"; 
 import {ISocialRecoveryPlugin} from "../../src/interfaces/ISocialRecoveryPlugin.sol"; 
 import {AaveV3Sepolia} from "aave-address-book/src/AaveV3Sepolia.sol";
-import {MockReserveInterestRateStrategy} from "@aave/contracts/mocks/tests/MockReserveInterestRateStrategy.sol";
-import {IPoolAddressesProvider} from "@aave/contracts/interfaces/IPoolAddressesProvider.sol";
-import {IPool} from "@aave/contracts/interfaces/IPool.sol";
+import {MockReserveInterestRateStrategy} from "@aave/v3/core/contracts/mocks/tests/MockReserveInterestRateStrategy.sol";
+import {IPoolAddressesProvider} from "@aave/v3/core/contracts/interfaces/IPoolAddressesProvider.sol";
+import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
 import {EntryPoint} from "account-abstraction/contracts/core/EntryPoint.sol";
 
 contract DeployHelper is Script, Constants {
@@ -44,7 +44,7 @@ contract DeployHelper is Script, Constants {
     address[] private priceFeeds;
     string[] private names;
     address[] private deployments;
-    DevOps devOps = new DevOps();
+    ConfigHelper configHelper = new ConfigHelper();
 
     constructor() {
         _initialize();
@@ -197,7 +197,7 @@ contract DeployHelper is Script, Constants {
     ) private {
         names = ["WrappedEth", "WethPriceFeed", "WrappedBtc", "WbtcPriceFeed", "LinkToken", "EntryPoint", "AutomationRegistrar"];
         deployments = [wrappedEth, wethPriceFeed, wrappedBtc, wbtcPriceFeed, linkToken, entryPoint, automationRegistrar];
-        devOps.saveDeployment(names, deployments);
+        configHelper.saveDeployment(names, deployments);
     }
 
     function _saveSepoliaDeployment(
@@ -207,6 +207,6 @@ contract DeployHelper is Script, Constants {
     ) private {
         names = ["WethPriceFeed", "WbtcPriceFeed", "AaveInterestRateStrategy"];
         deployments = [wethPriceFeed, wbtcPriceFeed, aaveInterestRateStrategy];
-        devOps.saveDeployment(names, deployments);
+        configHelper.saveDeployment(names, deployments);
     }
 }

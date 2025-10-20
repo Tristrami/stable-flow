@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {ISFAccount} from "../interfaces/ISFAccount.sol";
 import {ISFEngine} from "../interfaces/ISFEngine.sol";

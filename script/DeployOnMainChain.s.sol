@@ -1,54 +1,60 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {SFEngine} from "../src/token/SFEngine.sol";
 import {SFToken} from "../src/token/SFToken.sol";
+import {SFTokenPool} from "../src/token/SFTokenPool.sol";
+import {SFBridge} from "../src/bridge/SFBridge.sol";
 import {SFAccount} from "../src/account/SFAccount.sol";
 import {SFAccountFactory} from "../src/account/SFAccountFactory.sol";
 import {DeployHelper} from "./util/DeployHelper.sol";
-import {DevOps} from "./util/DevOps.s.sol";
+import {ConfigHelper} from "./util/ConfigHelper.sol";
 import {Script} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
+import {BaseDeployment} from "./BaseDeployment.s.sol";
+import {Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
-contract Deploy is Script {
+contract DeployOnMainChain is BaseDeployment {
 
-    address[] private tokenAddresses;
-    address[] private priceFeedAddresses;
-    string[] private names;
-    address[] private deployments;
-    DeployHelper private deployHelper;
-    DevOps private devOps;
-
-    constructor() {
-        deployHelper = new DeployHelper();
-        devOps = new DevOps();
-    }
+    error DeployOnMainChain__NotOnMainChain();
 
     function run() external {
+        if (block.chainid != chainConfig.mainChainId) {
+            revert DeployOnMainChain__NotOnMainChain();
+        }
         deploy();
     }
 
     function deploy() public returns (
         address sfTokenAddress, 
         address sfEngineAddress,
+        address sfTokenPoolAddress,
+        address sfBridgeAddress,
         address sfAccountFactoryAddress,
         address sfAccountBeaconAddress,
         DeployHelper.DeployConfig memory deployConfig
     ) {
         deployConfig = deployHelper.getDeployConfig();
-        (sfTokenAddress, sfEngineAddress) = _deploySFTokenAndEngine();
+        (sfTokenAddress, sfEngineAddress, sfTokenPoolAddress) = _deploySFTokenAndPoolAndEngine();
+        sfBridgeAddress = _deploySFBridge(sfTokenAddress);
         sfAccountBeaconAddress = _deploySFAccountBeacon();
         sfAccountFactoryAddress = _deployAccountFactory(sfEngineAddress, sfAccountBeaconAddress);
         _saveDeployment(
             sfTokenAddress,
             sfEngineAddress, 
+            sfTokenPoolAddress,
+            sfBridgeAddress,
             sfAccountFactoryAddress, 
             sfAccountBeaconAddress
         );
     }
 
-    function _deploySFTokenAndEngine() private returns (address sfTokenAddress, address sfEngineAddress) {
+    function _deploySFTokenAndPoolAndEngine() private returns (
+        address sfTokenAddress, 
+        address sfEngineAddress,
+        address sfTokenPoolAddress
+    ) {
         DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         bytes32 salt = _salt();
         tokenAddresses = [deployConfig.wethTokenAddress, deployConfig.wbtcTokenAddress];
@@ -71,10 +77,20 @@ contract Deploy is Script {
             tokenAddresses, 
             priceFeedAddresses
         );
-        // Transfer SFToken's ownership to sfEngineProxy
-        sfTokenProxy.transferOwnership(address(sfEngineProxy));
+        // Deploy token pool
+        Register.NetworkDetails memory networkDetails = register.getNetworkDetails(block.chainid);
+        SFTokenPool sfTokenPool = new SFTokenPool(
+            chainConfig.mainChainId,
+            sfTokenProxy,
+            new address[](0),
+            networkDetails.rmnProxyAddress,
+            networkDetails.routerAddress
+        );
+        // Grant minter role to SF Engine and SF token pool
+        sfTokenProxy.addMinter(address(sfEngineProxy));
+        sfTokenProxy.addMinter(address(sfTokenPool));
         vm.stopBroadcast();
-        return (address(sfTokenProxy), address(sfEngineProxy));
+        return (address(sfTokenProxy), address(sfEngineProxy), address(sfTokenPool));
     }
 
     function _deploySFAccountBeacon() private returns (address beaconAddress) {
@@ -110,12 +126,14 @@ contract Deploy is Script {
     function _saveDeployment(
         address sfTokenAddress, 
         address sfEngineAddress,
+        address sfTokenPoolAddress,
+        address sfBridgeAddress,
         address sfAccountFactoryAddress,
         address sfAccountBeaconAddress
     ) private {
-        names = ["SFToken", "SFEngine", "SFAccountBeacon", "SFAccountFactory"];
-        deployments = [sfTokenAddress, sfEngineAddress, sfAccountBeaconAddress, sfAccountFactoryAddress];
-        devOps.saveDeployment(names, deployments);
+        names = ["SFToken", "SFEngine", "SFTokenPool", "SFBridge", "SFAccountBeacon", "SFAccountFactory"];
+        deployments = [sfTokenAddress, sfEngineAddress, sfTokenPoolAddress, sfBridgeAddress, sfAccountBeaconAddress, sfAccountFactoryAddress];
+        configHelper.saveDeployment(names, deployments);
     }
 
     function _salt() private view returns (bytes32) {

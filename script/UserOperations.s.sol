@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {Script, console2} from "forge-std/Script.sol";
 import {SFAccountFactory} from "../src/account/SFAccountFactory.sol";
 import {ISFAccount} from "../src/interfaces/ISFAccount.sol";
 import {IVaultPlugin} from "../src/interfaces/IVaultPlugin.sol";
 import {ISocialRecoveryPlugin} from "../src/interfaces/ISocialRecoveryPlugin.sol";
-import {DevOps} from "../script/util/DevOps.s.sol";
+import {ConfigHelper} from "../script/util/ConfigHelper.sol";
 import {Constants} from "../script/util/Constants.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {BeaconProxy} from "@openzeppelin/contracts/proxy/beacon/BeaconProxy.sol";
@@ -19,10 +19,10 @@ contract BaseOperation is Script, Constants {
 
     error BaseOperation__AccountNotExists();
 
-    DevOps internal devOps;
+    ConfigHelper internal configHelper;
 
     constructor() {
-        devOps = new DevOps();
+        configHelper = new ConfigHelper();
     }
 
     function createUserOp(
@@ -118,8 +118,8 @@ contract UpdateCustomVaultConfig is BaseOperation {
         IVaultPlugin.CustomVaultConfig memory customConfig
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount, 
             customConfig
@@ -144,9 +144,9 @@ contract CreateAccount is BaseOperation {
     function run() external returns (address sfAccount) {
         return run(
             msg.sender,
-            devOps.getLatestDeployment("EntryPoint"),
-            devOps.getLatestDeployment("SFAccountFactory"), 
-            devOps.getLatestDeployment("SFAccountBeacon")
+            configHelper.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"), 
+            configHelper.getLatestDeployment("SFAccountBeacon")
         );
     }
 
@@ -193,8 +193,8 @@ contract Transfer is BaseOperation {
         uint256 amount
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             from, 
             to, 
@@ -224,8 +224,8 @@ contract Invest is BaseOperation {
         uint256 amountCollateral
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             collateralAddress,
@@ -256,8 +256,8 @@ contract Harvest is BaseOperation {
         uint256 debtToRepay
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             collateralAddress,
@@ -297,8 +297,8 @@ contract Liquidate is BaseOperation {
         uint256 debtToCover
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             accountToLiquidate,
@@ -337,8 +337,8 @@ contract TopUpCollateral is BaseOperation {
         uint256 amount
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             collateralAddress, 
@@ -374,8 +374,8 @@ contract Deposit is BaseOperation {
         uint256 amount
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             collateralAddress, 
@@ -412,8 +412,8 @@ contract Withdraw is BaseOperation {
         uint256 amount
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             collateralAddress, 
@@ -448,8 +448,8 @@ contract UpdateCustomRecoveryConfig is BaseOperation {
         ISocialRecoveryPlugin.CustomRecoveryConfig memory customConfig
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount, 
             customConfig
@@ -477,8 +477,8 @@ contract InitiateRecovery is BaseOperation {
         address newOwner
     ) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             accountToRecover, 
@@ -510,8 +510,8 @@ contract ApproveRecovery is BaseOperation {
     
     function run(address sfAccount, address accountToRecover) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             accountToRecover
@@ -537,8 +537,8 @@ contract CancelRecovery is BaseOperation {
     
     function run(address sfAccount, address accountToRecover) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             accountToRecover
@@ -564,8 +564,8 @@ contract CompleteRecovery is BaseOperation {
     
     function run(address sfAccount, address accountToRecover) public {
         run(
-            devOps.getLatestDeployment("SFAccountFactory"),
-            devOps.getLatestDeployment("EntryPoint"),
+            configHelper.getLatestDeployment("SFAccountFactory"),
+            configHelper.getLatestDeployment("EntryPoint"),
             msg.sender, 
             sfAccount,
             accountToRecover

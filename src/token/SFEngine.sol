@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.30;
+pragma solidity ^0.8.24;
 
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
 import {SFToken} from "./SFToken.sol";
@@ -601,8 +601,6 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
      * @dev Updates the investment ratio parameter
      * @dev This ratio determines what percentage of collateral is allocated to yield strategies
      * @param newInvestmentRatio New ratio (18 decimals, 1e18 = 100%)
-     * @custom:emits ISFEngine__UpdateInvestmentRatio
-     * @custom:security Only callable by authorized contracts
      */
     function _updateInvestmentRatio(uint256 newInvestmentRatio) private {
         investmentRatio = newInvestmentRatio;
@@ -683,7 +681,6 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     /**
      * @dev Harvests yield from all invested assets
      * @dev Performs full withdrawal from all yield positions
-     * @custom:emits ISFEngine__Harvest For each asset harvested
      */
     function _harvestAll() private {
         address[] memory assets = aaveInvestment.investedAssets.keys();
