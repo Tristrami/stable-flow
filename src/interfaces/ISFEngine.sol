@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import {IUpkeepIntegration} from "./IUpkeepIntegration.sol";
+
 /**
  * @title ISFEngine Interface
  * @dev Core interface for the SFEngine contract defining all external-facing functions
  */
-interface ISFEngine {
+interface ISFEngine is IUpkeepIntegration {
 
     /* -------------------------------------------------------------------------- */
     /*                                   Errors                                   */
@@ -169,7 +171,7 @@ interface ISFEngine {
         uint256 indexed amount, 
         uint256 indexed interest
     );
-    
+
     /**
      * @notice Deposits collateral and mints SF Tokens in a single transaction
      * @dev Combines collateral deposit, token minting, and automated yield farming
@@ -212,6 +214,12 @@ interface ISFEngine {
         uint256 amountCollateralToRedeem,
         uint256 amountSFToBurn
     ) external;
+
+    /**
+     * @dev Emitted when the Chainlink Automation upkeep gas limit is updated
+     * @param gasLimit The new gas limit value (indexed for filtering)
+     */ 
+    event ISFEngine__GasLimitUpdated(uint32 indexed gasLimit);
 
     /**
      * @dev Liquidates an undercollateralized position
@@ -378,4 +386,12 @@ interface ISFEngine {
      * @return address Address of the SF token contract
      */
     function getSFTokenAddress() external view returns (address);
+
+    /**
+     * @dev Updates the gas limit for upkeep executions
+     * @param gasLimit New gas limit value
+     * @notice Emits ISFEngine__UpkeepGasLimitUpdated event
+     * @notice Value must be set according to actual upkeep operation needs
+     */
+    function setUpkeepGasLimit(uint32 gasLimit) external;
 }

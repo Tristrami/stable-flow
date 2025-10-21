@@ -67,6 +67,13 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Restricts access to authorized guardians only
+     * @notice Reverts with ISocialRecoveryPlugin__OnlyGuardian if:
+     * - Caller doesn't have GUARDIAN_ROLE
+     * - Caller isn't in guardians list
+     * @notice Used for guardian-only operations like recovery approvals
+     */
     modifier onlyGuardian() {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if (!hasRole(GUARDIAN_ROLE, _msgSender()) || !$.guardians.contains(_msgSender())) {
@@ -75,16 +82,32 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         _;
     }
 
+    /**
+     * @dev Ensures account is not in recovery process
+     * @notice Reverts with ISocialRecoveryPlugin__AccountIsInRecoveryProcess if active recovery exists
+     * @notice Used to prevent operations during active recovery
+     */
     modifier notRecovering() {
         _requireNotRecovering();
         _;
     }
 
+    /**
+     * @dev Ensures social recovery is enabled for this contract
+     * @notice Reverts with ISocialRecoveryPlugin__SocialRecoveryNotSupported if disabled
+     * @notice Used to gate recovery-related functionality
+     */
     modifier recoverable() {
         _requireSupportsSocialRecovery();
         _;
     }
 
+    /**
+     * @dev Ensures social recovery is enabled for specified account
+     * @param account Address to check for recovery support
+     * @notice Reverts with ISocialRecoveryPlugin__SocialRecoveryNotSupported if disabled
+     * @notice Used for cross-account recovery operations
+     */
     modifier recoverableAccount(address account) {
         _requireSupportsSocialRecovery(account);
         _;
@@ -94,6 +117,20 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     /*                                 Initializer                                */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Initializes the SocialRecoveryPlugin
+     * @param recoveryConfig Base recovery configuration parameters
+     * @param customRecoveryConfig Custom recovery configuration parameters
+     * @param sfEngine Reference to SFEngine contract
+     * @notice Sets up:
+     * - SFEngine dependency
+     * - Base recovery rules
+     * - Custom recovery settings
+     * Requirements:
+     * - recoveryConfig must pass validation
+     * - customRecoveryConfig must pass validation
+     * - sfEngine must implement ISFEngine interface
+     */
     function __SocialRecoveryPlugin_init(
         RecoveryConfig memory recoveryConfig,
         CustomRecoveryConfig memory customRecoveryConfig,
@@ -292,12 +329,23 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
     /*                        Internal / Private Functions                        */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Returns the storage pointer for SocialRecoveryPluginStorage at predefined slot
+     * @return $ The SocialRecoveryPluginStorage struct at fixed storage location
+     */
     function _getSocialRecoveryPluginStorage() private pure returns (SocialRecoveryPluginStorage storage $) {
         assembly {
             $.slot := SOCIAL_RECOVERY_PLUGIN_STORAGE_LOCATION
         }
     }
 
+    /**
+     * @dev Updates the social recovery configuration
+     * @param recoveryConfig New recovery configuration parameters
+     * Emits ISocialRecoveryPlugin__UpdateRecoveryConfig event on success
+     * Requirements:
+     * - maxGuardians must be non-zero
+     */
     function _updateSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) internal {
         _checkSocialRecoveryConfig(recoveryConfig);
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
@@ -305,12 +353,24 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         emit ISocialRecoveryPlugin__UpdateRecoveryConfig(abi.encode(recoveryConfig));
     }
 
+    /**
+     * @dev Validates social recovery configuration parameters
+     * @param recoveryConfig Configuration to validate
+     * Requirements:
+     * - maxGuardians must be greater than 0
+     */
     function _checkSocialRecoveryConfig(RecoveryConfig memory recoveryConfig) private pure {
         if (recoveryConfig.maxGuardians == 0) {
             revert ISocialRecoveryPlugin__MaxGuardiansCanNotBeZero();
         }
     }
 
+    /**
+     * @dev Updates custom social recovery configuration
+     * @param customConfig New custom configuration parameters
+     * Emits ISocialRecoveryPlugin__UpdateCustomRecoveryConfig event
+     * Automatically updates guardians list if changed
+     */
     function _updateCustomSocialRecoveryConfig(CustomRecoveryConfig memory customConfig) internal {
         _checkCustomSocialRecoveryConfig(customConfig);
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
@@ -319,6 +379,15 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         emit ISocialRecoveryPlugin__UpdateCustomRecoveryConfig(abi.encode(customConfig));
     }
 
+    /**
+     * @dev Validates custom social recovery configuration
+     * @param customConfig Configuration to validate
+     * Requirements:
+     * - If disabling recovery, account must not be in recovery process
+     * - minGuardianApprovals must be non-zero
+     * - Guardians list must not be empty
+     * - minGuardianApprovals must not exceed guardians count
+     */
     function _checkCustomSocialRecoveryConfig(CustomRecoveryConfig memory customConfig) private view {
         if (!customConfig.socialRecoveryEnabled) {
             return;
@@ -326,7 +395,6 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if ($.customRecoveryConfig.socialRecoveryEnabled 
             && !customConfig.socialRecoveryEnabled) {
-            // If disable social recovery, check whether account is in recovering process
             _requireNotRecovering();
         }
         if (customConfig.minGuardianApprovals == 0) {
@@ -343,6 +411,12 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         }
     }
 
+    /**
+     * @dev Updates the list of guardians
+     * @param guardians Array of guardian addresses to set
+     * Emits ISocialRecoveryPlugin__UpdateGuardians event
+     * Note: Clears existing guardians before adding new ones
+     */
     function _updateGuardians(address[] memory guardians) private {
         if (guardians.length == 0) {
             return;
@@ -356,6 +430,12 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         emit ISocialRecoveryPlugin__UpdateGuardians(guardians.length);
     }
 
+    /**
+     * @dev Gets the currently active recovery record
+     * @return RecoveryRecord storage reference to pending recovery
+     * Requirements:
+     * - Must be in active recovery process (not completed/cancelled)
+     */
     function _getPendingRecovery() private view returns (RecoveryRecord storage) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if ($.recoveryRecords.length == 0) {
@@ -368,6 +448,10 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         return latestRecord;
     }
 
+    /**
+     * @dev Gets pending recovery record without validation
+     * @return recoveryRecord Current recovery record (empty if none active)
+     */
     function _getPendingRecoveryUnchecked() private view returns (RecoveryRecord memory recoveryRecord) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if ($.recoveryRecords.length == 0) {
@@ -379,6 +463,14 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
             : latestRecord;
     }
 
+    /**
+     * @dev Completes account recovery process
+     * @param completedBy Address initiating the completion
+     * Requirements:
+     * - Must have sufficient guardian approvals
+     * - Recovery must be executable (time lock expired)
+     * - Must be in active recovery process
+     */
     function _completeRecovery(address completedBy) private {
         RecoveryRecord storage recoveryRecord = _getPendingRecovery();
         uint256 currentApprovals = recoveryRecord.approvedGuardians.length;
@@ -400,17 +492,29 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         );
     }
 
+    /**
+     * @dev Checks if social recovery is enabled
+     * @return bool True if social recovery is currently enabled
+     */
     function _supportsSocialRecovery() private view returns (bool) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         return $.customRecoveryConfig.socialRecoveryEnabled;
     }
 
+    /**
+     * @dev Requires account not to be in recovery process
+     * Reverts with ISocialRecoveryPlugin__AccountIsInRecoveryProcess if active recovery exists
+     */
     function _requireNotRecovering() internal view {
         if (_existsPendingRecovery()) {
             revert ISocialRecoveryPlugin__AccountIsInRecoveryProcess();
         }
     }
 
+    /**
+     * @dev Checks if there's an active recovery process
+     * @return bool True if active recovery exists and not completed/cancelled
+     */
     function _existsPendingRecovery() private view returns (bool) {
         SocialRecoveryPluginStorage storage $ = _getSocialRecoveryPluginStorage();
         if (!$.customRecoveryConfig.socialRecoveryEnabled) {
@@ -423,12 +527,21 @@ abstract contract SocialRecoveryPlugin is ISocialRecoveryPlugin, FreezePlugin {
         return !(latestRecord.isCompleted || latestRecord.isCancelled);
     }
 
+    /**
+     * @dev Requires social recovery to be supported by current account
+     * Reverts with ISocialRecoveryPlugin__SocialRecoveryNotSupported if disabled
+     */
     function _requireSupportsSocialRecovery() private view {
         if (!_supportsSocialRecovery()) {
             revert ISocialRecoveryPlugin__SocialRecoveryNotSupported();
         }
     }
 
+    /**
+     * @dev Requires specified account to support social recovery
+     * @param account Address to check for social recovery support
+     * Reverts with ISocialRecoveryPlugin__SocialRecoveryNotSupported if disabled
+     */
     function _requireSupportsSocialRecovery(address account) private view {
         _requireSFAccount(account);
         if (!ISocialRecoveryPlugin(account).supportsSocialRecovery()) {

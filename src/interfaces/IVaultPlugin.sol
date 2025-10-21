@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-interface IVaultPlugin {
+import {IUpkeepIntegration} from "./IUpkeepIntegration.sol";
+
+interface IVaultPlugin is IUpkeepIntegration {
 
     /* -------------------------------------------------------------------------- */
     /*                                   Errors                                   */

@@ -30,18 +30,49 @@ abstract contract BaseSFAccountPlugin is ISFAccount, BaseAccount, OwnableUpgrade
 
     using ERC165Checker for address;
 
+    /**
+     * @dev Error thrown when an address is not a valid SFAccount contract
+     * @notice Indicates either:
+     * - Address is zero
+     * - Address contains no code
+     * - Address doesn't implement ISFAccount interface
+     */
     error BaseSFAccountPlugin__NotSFAccount();
 
+    /**
+     * @dev Modifier to restrict access to EntryPoint contract only
+     * @notice Reverts with custom error if caller is not the EntryPoint
+     * @notice Used to protect functions that should only be called during user operations
+     * @dev Internally calls `_requireFromEntryPoint()` validation
+     */
     modifier onlyEntryPoint() {
         _requireFromEntryPoint();
         _;
     }
 
+    /**
+     * @dev Modifier to validate an address is a proper SFAccount
+     * @param account Address to validate
+     * @notice Reverts with BaseSFAccountPlugin__NotSFAccount if:
+     * - Address is zero
+     * - Address is not a contract
+     * - Doesn't implement ISFAccount interface
+     * @notice Used when interacting with external SFAccount contracts
+     */
     modifier onlySFAccount(address account) {
         _requireSFAccount(account);
         _;
     }
 
+    /**
+     * @dev Internal validation for SFAccount contracts
+     * @param account Address to validate
+     * @notice Performs three checks:
+     * 1. Non-zero address check
+     * 2. Contract existence check (code size > 0)
+     * 3. Interface support check (ISFAccount)
+     * @notice Reverts with BaseSFAccountPlugin__NotSFAccount on failure
+     */
     function _requireSFAccount(address account) internal view {
         if (account == address(0) 
             || account.code.length == 0

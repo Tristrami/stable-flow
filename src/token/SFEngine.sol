@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 
 import {ISFEngine} from "../interfaces/ISFEngine.sol";
+import {IUpkeepIntegration} from "../interfaces/IUpkeepIntegration.sol";
 import {SFToken} from "./SFToken.sol";
 import {OracleLib, AggregatorV3Interface} from "../libraries/OracleLib.sol";
 import {AaveInvestmentIntegration} from "../libraries/AaveInvestmentIntegration.sol";
@@ -13,6 +14,7 @@ import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
+import {UpkeepIntegration, AutomationRegistrarInterface} from "../libraries/UpkeepIntegration.sol";
 
 /**
  * @title SFEngine
@@ -40,6 +42,7 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     using EnumerableMap for EnumerableMap.AddressToUintMap;
     using OracleLib for AggregatorV3Interface;
     using AaveInvestmentIntegration for AaveInvestmentIntegration.Investment;
+    using UpkeepIntegration for AutomationRegistrarInterface;
 
     /* -------------------------------------------------------------------------- */
     /*                                  Constants                                 */
@@ -73,14 +76,19 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
      */
     uint256 private constant MINIMUM_COLLATERAL_RATIO = 2 * PRECISION_FACTOR;
 
+    /**
+     * @dev Initial amount of LINK tokens to fund Chainlink Upkeep
+     */
+    uint96 private constant UPKEEP_INITIAL_LINK_AMOUNT = uint96(1 * PRECISION_FACTOR);
+
     /* -------------------------------------------------------------------------- */
     /*                              State Variables                               */
     /* -------------------------------------------------------------------------- */
 
     /**
-     * @notice Current percentage of collateral allocated to Aave for yield generation
+     * @dev Current percentage of collateral allocated to Aave for yield generation
      * @dev Represented in basis points (1e18 = 100%)
-     * @dev Example values:
+     * @notice Example values:
      *   - 0.3e18 = 30% of collateral invested
      *   - 0.5e18 = 50% of collateral invested
      */
@@ -93,9 +101,9 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     uint256 private autoHarvestDuration;
 
     /**
-     * @notice Timestamp of last automated yield harvest
+     * @dev Timestamp of last automated yield harvest
      * @dev Used with autoHarvestDuration to determine next harvest eligibility
-     * @dev Reset to block.timestamp on:
+     * @notice Reset to block.timestamp on:
      *   - Manual harvests
      *   - Successful auto-harvests
      *   - Investment ratio changes
@@ -103,15 +111,15 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     uint256 private lastAutoHarvestTime;
 
     /**
-     * @notice Liquidation bonus rate for incentivizing liquidators
-     * @dev Determines the additional collateral percentage awarded to liquidators
-     * @dev Calculation: `bonusAmount = collateralToLiquidate * bonusRate / PRECISION_FACTOR`
+     * @dev Liquidation bonus rate for incentivizing liquidators
+     * @notice Determines the additional collateral percentage awarded to liquidators
+     * @notice Calculation: `bonusAmount = collateralToLiquidate * bonusRate / PRECISION_FACTOR`
      */
     uint256 private bonusRate;
 
     /**
-     * @notice Tracks harvested yields per asset
-     * @dev Mapping format: assetAddress => accumulatedYieldAmount
+     * @dev Tracks harvested yields per asset
+     * @notice Mapping format: assetAddress => accumulatedYieldAmount
      */
     EnumerableMap.AddressToUintMap private investmentGains;
 
@@ -154,6 +162,31 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
      */
     AaveInvestmentIntegration.Investment private aaveInvestment;
 
+    /**
+     * @dev Address of Chainlink Automation Upkeep Registrar contract
+     * @notice Used to register and manage automated upkeep jobs
+     */
+    address private automationRegistrarAddress;
+
+    /**
+     * @dev Address of the LINK token contract
+     * @notice Used for paying Chainlink Automation fees
+     */
+    address private linkTokenAddress;
+
+    /**
+     * @dev Tracks Chainlink Automation upkeep ID for this vault
+     * @notice Unique identifier for the registered upkeep job
+     */
+    uint256 private upkeepId;
+
+    /**
+     * @dev Gas limit allocated for Chainlink Automation upkeep executions
+     * @notice Defines the maximum gas consumption for each upkeep run
+     * @notice Must be set according to the complexity of the upkeep operations
+     */
+    uint32 private upkeepGasLimit;
+
     /* -------------------------------------------------------------------------- */
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
@@ -167,12 +200,36 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     /*                                 Initializer                                */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Initializes the SFEngine contract with core parameters
+     * @param _sfTokenAddress Address of the SFToken contract
+     * @param _aavePoolAddress Address of Aave lending pool
+     * @param _investmentRatio Ratio for investment allocation (1e18 precision)
+     * @param _autoHarvestDuration Interval between auto-harvests (seconds)
+     * @param _bonusRate Bonus rate for early harvesters (1e18 precision)
+     * @param _automationRegistrarAddress Chainlink Automation registrar
+     * @param _linkTokenAddress LINK token contract address
+     * @param _tokenAddresses Array of supported collateral token addresses
+     * @param _priceFeedAddresses Array of corresponding price feed addresses
+     * @notice Performs critical setup including:
+     * - Initializes upgradeable and ownable patterns
+     * - Sets up supported collaterals with price feeds
+     * - Configures Aave investment parameters
+     * - Registers Chainlink Automation upkeep
+     * Requirements:
+     * - Must be called during contract initialization
+     * - _tokenAddresses and _priceFeedAddresses must have equal length
+     * - _investmentRatio must be > 0
+     */
     function initialize(
         address _sfTokenAddress, 
         address _aavePoolAddress,
         uint256 _investmentRatio,
         uint256 _autoHarvestDuration,
         uint256 _bonusRate,
+        address _automationRegistrarAddress,
+        address _linkTokenAddress,
+        uint32 _upkeepGasLimit,
         address[] memory _tokenAddresses, 
         address[] memory _priceFeedAddresses
     ) external initializer {
@@ -186,8 +243,26 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         lastAutoHarvestTime = block.timestamp;
         aaveInvestment.poolAddress = _aavePoolAddress;
         aaveInvestment.sfEngineAddress = address(this);
+        automationRegistrarAddress = _automationRegistrarAddress;
+        linkTokenAddress = _linkTokenAddress;
+        upkeepGasLimit = _upkeepGasLimit;
+        upkeepId = _registerUpkeep();
     }
 
+    /**
+     * @dev Reinitializes contract with updated parameters
+     * @param _version Reinitialization version number
+     * @param _investmentRatio New investment allocation ratio (1e18 precision)
+     * @param _autoHarvestDuration New auto-harvest interval (seconds)
+     * @param _bonusRate New bonus rate for early harvesters (1e18 precision)
+     * @param _tokenAddresses Updated array of collateral token addresses
+     * @param _priceFeedAddresses Updated array of price feed addresses
+     * @notice Allows safe modification of key parameters post-deployment
+     * Requirements:
+     * - Must specify higher _version than previous initialization
+     * - _tokenAddresses and _priceFeedAddresses must have equal length
+     * - _investmentRatio must be > 0
+     */
     function reinitialize(
         uint64 _version,
         uint256 _investmentRatio,
@@ -388,6 +463,27 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
     function getSFTokenAddress() external view override returns (address) {
         return address(sfToken);
     }
+    
+    /// @inheritdoc ISFEngine
+    function setUpkeepGasLimit(uint32 gasLimit) external override onlyOwner {
+        upkeepGasLimit = gasLimit;
+        emit ISFEngine__GasLimitUpdated(gasLimit);
+    }
+
+    /// @inheritdoc IUpkeepIntegration
+    function getUpkeepId() external view override returns (uint256) {
+        return upkeepId;
+    }
+
+    /// @inheritdoc IUpkeepIntegration
+    function getUpkeepGasLimit() external view override returns (uint32) {
+        return upkeepGasLimit;
+    }
+
+    /// @inheritdoc IUpkeepIntegration
+    function getUpkeepInitialLinkAmount() external pure override returns (uint256) {
+        return UPKEEP_INITIAL_LINK_AMOUNT;
+    }
 
     /// @inheritdoc AutomationCompatibleInterface
     function checkUpkeep(bytes calldata /* checkData */) external view override returns (
@@ -419,6 +515,22 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         if (!newImplementation.supportsInterface(type(ISFEngine).interfaceId)) {
             revert ISFEngine__IncompatibleImplementation();
         }
+    }
+
+    /**
+     * @dev Registers a new Chainlink Automation upkeep for the SF engine
+     * @return uint256 The newly assigned upkeep ID
+     */
+    function _registerUpkeep() private returns (uint256) {
+        return AutomationRegistrarInterface(automationRegistrarAddress).register(
+            "SFEngine Upkeep",
+            address(this),
+            owner(),
+            linkTokenAddress,
+            owner(),
+            UPKEEP_INITIAL_LINK_AMOUNT,
+            upkeepGasLimit
+        );
     }
 
     /**
@@ -689,12 +801,28 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         }
     }
 
+    /**
+     * @dev Validates that a collateral asset is supported by the system
+     * @param collateral Address of the collateral asset to check
+     * @notice Checks if a price feed exists for the collateral asset
+     * @notice Reverts with ISFEngine__CollateralNotSupported if collateral is invalid
+     * Requirements:
+     * - collateral must have a registered price feed
+     */
     function _requireSupportedCollateral(address collateral) private view {
         if (priceFeeds[collateral] == address(0)) {
             revert ISFEngine__CollateralNotSupported();
         }
     }
 
+    /**
+     * @dev Ensures a user's collateral ratio is above the minimum threshold
+     * @param user Address of the user to check
+     * @notice Reverts if user's collateral ratio is below safe level
+     * @notice Uses _checkCollateralRatio to get current ratio status
+     * Requirements:
+     * - User must maintain sufficient collateralization
+     */
     function _requireCollateralRatioIsNotBroken(address user) private view {
         (bool isBroken, uint256 collateralRatio) = _checkCollateralRatio(user);
         if (isBroken) {
@@ -702,6 +830,14 @@ contract SFEngine is ISFEngine, AutomationCompatibleInterface, UUPSUpgradeable, 
         }
     }
 
+    /**
+     * @dev Ensures a user's collateral ratio is below the minimum threshold
+     * @param user Address of the user to check
+     * @notice Reverts if user's collateral ratio is above safe level
+     * @notice Used for liquidation eligibility checks
+     * Requirements:
+     * - User must be undercollateralized
+     */
     function _requireCollateralRatioIsBroken(address user) private view {
         (bool isBroken, uint256 collateralRatio) = _checkCollateralRatio(user);
         if (!isBroken) {

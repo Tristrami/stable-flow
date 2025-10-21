@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {FreezePlugin} from "./FreezePlugin.sol";
 import {IVaultPlugin} from "../../interfaces/IVaultPlugin.sol";
 import {ISFEngine} from "../../interfaces/ISFEngine.sol";
+import {IUpkeepIntegration} from "../../interfaces/IUpkeepIntegration.sol";
 import {OracleLib, AggregatorV3Interface} from "../../libraries/OracleLib.sol";
 import {EnumerableSet} from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {EnumerableMap} from "@openzeppelin/contracts/utils/structs/EnumerableMap.sol";
@@ -11,8 +12,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
 import {AutomationCompatible} from "@chainlink/contracts/src/v0.8/automation/AutomationCompatible.sol";
 import {AutomationCompatibleInterface} from "@chainlink/contracts/src/v0.8/automation/interfaces/AutomationCompatibleInterface.sol";
-import {AutomationRegistrarInterface} from "../../interfaces/AutomationRegistrarInterface.sol";
-import {UpkeepIntegration} from "../../libraries/UpkeepIntegration.sol";
+import {UpkeepIntegration, AutomationRegistrarInterface} from "../../libraries/UpkeepIntegration.sol";
 
 /**
  * @title VaultPlugin
@@ -91,6 +91,14 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Modifier to validate that a collateral asset is supported
+     * @param collateral Address of the collateral token to check
+     * @notice Reverts with `ISFEngine__CollateralNotSupported` if:
+     * - Collateral address is zero
+     * - No price feed exists for the collateral
+     * @notice Used to protect functions requiring valid collateral assets
+     */
     modifier requireSupportedCollateral(address collateral) {
         _requireSupportedCollateral(collateral);
         _;
@@ -100,6 +108,26 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     /*                                 Initializer                                */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Initializes the VaultPlugin with core configuration parameters
+     * @param vaultConfig Base vault configuration parameters
+     * @param customVaultConfig Custom vault configuration parameters
+     * @param sfEngine Reference to the SFEngine contract
+     * @param sfTokenAddress Address of the SFToken contract
+     * @param automationRegistrarAddress Chainlink Automation registrar address
+     * @param linkTokenAddress LINK token contract address
+     * @notice Performs critical initialization including:
+     * - Sets up SFEngine and SFToken dependencies
+     * - Configures Chainlink Automation integration
+     * - Updates vault configurations
+     * Requirements:
+     * - `vaultConfig` must pass validation checks
+     * - `customVaultConfig` must pass validation checks
+     * - `sfEngine` must implement ISFEngine interface
+     * - `sfTokenAddress` must be non-zero
+     * - `automationRegistrarAddress` must be non-zero
+     * - `linkTokenAddress` must be non-zero
+     */
     function __VaultPlugin_init(
         VaultConfig memory vaultConfig,
         CustomVaultConfig memory customVaultConfig,
@@ -371,6 +399,24 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         return $.depositedCollaterals.values();
     }
 
+    /// @inheritdoc IUpkeepIntegration
+    function getUpkeepId() external view override returns (uint256) {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        return $.upkeepId;
+    }
+
+    /// @inheritdoc IUpkeepIntegration
+    function getUpkeepGasLimit() external view override returns (uint32) {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        return uint32($.customVaultConfig.upkeepGasLimit);
+    }
+
+    /// @inheritdoc IUpkeepIntegration
+    function getUpkeepInitialLinkAmount() external view override returns (uint256) {
+        VaultPluginStorage storage $ = _getVaultPluginStorage();
+        return $.customVaultConfig.upkeepLinkAmount;
+    }
+
     /// @inheritdoc AutomationCompatibleInterface
     function checkUpkeep(bytes calldata /* checkData */) external override returns (
         bool upkeepNeeded, 
@@ -402,12 +448,23 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
     /*                        Internal / Private Functions                        */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Returns the storage pointer for VaultPluginStorage at predefined slot
+     * @return $ The VaultPluginStorage struct at fixed storage location
+     */
     function _getVaultPluginStorage() private pure returns (VaultPluginStorage storage $) {
         assembly {
             $.slot := VAULT_PLUGIN_STORAGE_LOCATION
         }
     }
 
+    /**
+     * @dev Checks collateral safety status and calculates key ratios
+     * @return autoTopUpNeeded Whether automatic top-up is required
+     * @return danger Whether collateral ratio is below safety threshold
+     * @return collateralRatio Current collateralization ratio
+     * @return liquidationThreshold Minimum ratio before liquidation
+     */
     function _checkCollateralSafety() private view returns (
         bool autoTopUpNeeded,
         bool danger,
@@ -424,6 +481,15 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         autoTopUpNeeded = $.customVaultConfig.autoTopUpEnabled && danger;
     }
 
+    /**
+     * @dev Deposits additional collateral to maintain safe position
+     * @param collateralAddress Address of collateral token to deposit
+     * @param amountCollateral Amount of collateral to deposit (type(uint256).max for full balance)
+     * Requirements:
+     * - Collateral must be supported
+     * - Amount must be non-zero
+     * - Sufficient collateral balance must exist
+     */
     function _topUpCollateral(address collateralAddress, uint256 amountCollateral) private {
         if (collateralAddress == address(0)) {
             revert IVaultPlugin__CollateralNotSupported(collateralAddress);
@@ -453,6 +519,11 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         $.sfEngine.depositCollateralAndMintSFToken(collateralAddress, amountCollateral, 0);
     }
 
+    /**
+     * @dev Tops up collateral to reach target ratio
+     * @param targetCollateralRatio Desired collateralization ratio (in PRECISION_FACTOR units)
+     * Processes all supported collaterals until ratio is met or funds exhausted
+     */
     function _topUpToMaintainCollateralRatio(uint256 targetCollateralRatio) private {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 sfDebt = this.debt();
@@ -493,15 +564,30 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         }
     }
 
+    /**
+     * @dev Gets current balance of specified collateral token
+     * @param collateralAddress Address of collateral token
+     * @return Current token balance held by contract
+     */
     function _getCollateralBalance(address collateralAddress) private view returns (uint256) {
         return IERC20(collateralAddress).balanceOf(address(this));
     }
 
+    /**
+     * @dev Gets amount of collateral currently deposited in SFEngine
+     * @param collateralAddress Address of collateral token
+     * @return Amount deposited in SFEngine
+     */
     function _getCollateralInvested(address collateralAddress) private view returns (uint256) {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         return $.sfEngine.getCollateralAmount(address(this), collateralAddress);
     }
 
+    /**
+     * @dev Updates vault configuration with new parameters
+     * @param vaultConfig New configuration parameters
+     * Emits IVaultPlugin__UpdateVaultConfig event on success
+     */
     function _updateVaultConfig(VaultConfig memory vaultConfig) internal {
         _checkVaultConfig(vaultConfig);
         _updateSupportedCollaterals(vaultConfig.collaterals, vaultConfig.priceFeeds);
@@ -511,6 +597,13 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         emit IVaultPlugin__UpdateVaultConfig(configBytes);
     }
 
+    /**
+     * @dev Validates vault configuration parameters
+     * @param vaultConfig Configuration to validate
+     * Requirements:
+     * - Collaterals and priceFeeds arrays must not be empty
+     * - Arrays must have matching lengths
+     */
     function _checkVaultConfig(VaultConfig memory vaultConfig) private pure {
         if (vaultConfig.collaterals.length == 0 && vaultConfig.priceFeeds.length == 0) {
             revert IVaultPlugin__CollateralsAndPriceFeedsCanNotBeEmpty();
@@ -523,6 +616,12 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         }
     }
 
+    /**
+     * @dev Updates supported collateral tokens and their price feeds
+     * @param collaterals Array of collateral token addresses
+     * @param priceFeeds Array of corresponding price feed addresses
+     * Emits IVaultPlugin__UpdateCollateralAndPriceFeed event
+     */
     function _updateSupportedCollaterals(
         address[] memory collaterals, 
         address[] memory priceFeeds
@@ -544,6 +643,11 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         emit IVaultPlugin__UpdateCollateralAndPriceFeed(collaterals.length);
     }
 
+    /**
+     * @dev Updates custom vault configuration
+     * @param customConfig New custom configuration
+     * Automatically registers Chainlink upkeep if auto-topup is enabled
+     */
     function _updateCustomVaultConfig(CustomVaultConfig memory customConfig) private {
         _checkCustomVaultConfig(customConfig);
         VaultPluginStorage storage $ = _getVaultPluginStorage();
@@ -553,6 +657,10 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         emit IVaultPlugin__UpdateCustomVaultConfig(configBytes);
     }
 
+    /**
+     * @dev Registers Chainlink upkeep if auto-topup is newly enabled
+     * @param customConfig Custom vault configuration containing upkeep parameters
+     */
     function _registerUpkeepIfNecessary(CustomVaultConfig memory customConfig) private {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         bool topUpCurrentlyEnabled = $.customVaultConfig.autoTopUpEnabled;
@@ -561,7 +669,8 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
             if ($.upkeepId == 0) {
                 address owner = this.getOwner();
                 $.upkeepId = AutomationRegistrarInterface($.automationRegistrarAddress).register(
-                    this, 
+                    "Vault Upkeep",
+                    address(this), 
                     owner, 
                     $.linkTokenAddress,
                     owner,
@@ -572,6 +681,13 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         }
     }
 
+    /**
+     * @dev Validates custom configuration parameters
+     * @param customConfig Configuration to validate
+     * Requirements:
+     * - Auto-topup threshold must be >= minimum collateral ratio
+     * - Custom collateral ratio must be >= minimum ratio
+     */
     function _checkCustomVaultConfig(CustomVaultConfig memory customConfig) private view {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         uint256 minCollateralRatio = $.sfEngine.getMinimumCollateralRatio();
@@ -583,6 +699,12 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         }
     }
 
+    /**
+     * @dev Validates that collateral is supported
+     * @param collateral Address to check
+     * Requirements:
+     * - Collateral must exist in supportedCollaterals mapping
+     */
     function _requireSupportedCollateral(address collateral) private view {
         VaultPluginStorage storage $ = _getVaultPluginStorage();
         if (!$.supportedCollaterals.contains(collateral)) {

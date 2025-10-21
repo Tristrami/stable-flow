@@ -17,6 +17,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolDataProvider} from "aave-address-book/src/AaveV3.sol";
 import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
 import {Ownable} from "@aave/v3/core/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
+import {CCIPLocalSimulatorFork} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
 contract SFEngineTest is Test, Constants {
 
@@ -32,6 +33,7 @@ contract SFEngineTest is Test, Constants {
     }
 
     uint256 private constant INITIAL_USER_BALANCE = 100 ether;
+    uint256 private constant INITIAL_LINK_BALANCE = 1 * PRECISION_FACTOR;
     uint256 private constant LIQUIDATOR_DEPOSIT_AMOUNT = 1000 ether;
     uint256 private constant DEFAULT_AMOUNT_COLLATERAL = 2 ether;
     uint256 private constant DEFAULT_COLLATERAL_RATIO = 2 * PRECISION_FACTOR;
@@ -74,10 +76,13 @@ contract SFEngineTest is Test, Constants {
     function _setUpEthSepolia() private {
         $.forkId = vm.createSelectFork("ethSepolia");
         DeployOnMainChain deployer = new DeployOnMainChain();
+        DeployHelper.DeployConfig memory deployConfig = deployer.getDeployConfig();
+        // Request some link token
+        CCIPLocalSimulatorFork ccip = new CCIPLocalSimulatorFork();
+        ccip.requestLinkFromFaucet(deployConfig.account, INITIAL_LINK_BALANCE);
         (
             address sfTokenAddress, 
-            address sfEngineAddress, , , , ,
-            DeployHelper.DeployConfig memory deployConfig
+            address sfEngineAddress, , , ,
         ) = deployer.deploy();
         $.sfEngine = SFEngine(sfEngineAddress);
         $.sfToken = SFToken(sfTokenAddress);
@@ -188,13 +193,13 @@ contract SFEngineTest is Test, Constants {
         priceFeedAddresses = [address(0), address(1)];
         SFEngine engine = new SFEngine();
         vm.expectRevert(ISFEngine.ISFEngine__TokenAddressAndPriceFeedLengthNotMatch.selector);
-        engine.initialize(address(token), address(0), 0, 0, 0, tokenAddresses, priceFeedAddresses);
+        engine.initialize(address(token), address(0), 0, 0, 0, address(0), address(0), 0, tokenAddresses, priceFeedAddresses);
         // Token address length > price feed address length
         tokenAddresses = [address(0), address(1)];
         priceFeedAddresses = [address(0)];
         engine = new SFEngine();
         vm.expectRevert(ISFEngine.ISFEngine__TokenAddressAndPriceFeedLengthNotMatch.selector);
-        engine.initialize(address(token), address(0), 0, 0, 0, tokenAddresses, priceFeedAddresses);
+        engine.initialize(address(token), address(0), 0, 0, 0, address(0), address(0), 0, tokenAddresses, priceFeedAddresses);
     }
 
     function test_RevertWhen_DepositCollateralParamIsInvalid() public {

@@ -22,6 +22,9 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
     /*                                    Types                                   */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Storage structure for FreezePlugin state management
+     */
     struct FreezePluginStorage {
         /// @dev Account frozen status flag
         /// @notice When true, restricts most account operations
@@ -44,11 +47,23 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
     /*                                  Modifiers                                 */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Modifier to enforce frozen account state
+     * @notice Reverts with `IFreezePlugin__AccountIsNotFrozen` if account is not frozen
+     * @notice Used to restrict actions that require frozen state
+     * @dev Internally calls `_requireFrozen()` validation
+     */
     modifier requireFrozen() {
         _requireFrozen();
         _;
     }
 
+    /**
+     * @dev Modifier to enforce non-frozen account state
+     * @notice Reverts with `IFreezePlugin__AccountIsFrozen` if account is frozen
+     * @notice Used to protect standard operations when account is frozen
+     * @dev Internally calls `_requireNotFrozen()` validation
+     */
     modifier requireNotFrozen() {
         _requireNotFrozen();
         _;
@@ -58,6 +73,16 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
     /*                                 Initializer                                */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Initializes the FreezePlugin storage
+     * @notice Sets initial state:
+     * - `frozen` flag to false (unfrozen by default)
+     * - Initializes empty freezeRecords array
+     * @notice Called during contract initialization
+     * Requirements:
+     * - Must be called through proxy initialization
+     * - Storage must not be previously initialized
+     */
     function __FreezePlugin_init() internal {
         FreezePluginStorage storage $ = _getFreezePluginStorage();
         $.frozen = false;
@@ -92,12 +117,24 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
     /*                        Internal / Private Functions                        */
     /* -------------------------------------------------------------------------- */
 
+    /**
+     * @dev Returns the storage pointer for FreezePluginStorage at predefined slot
+     * @return $ The FreezePluginStorage struct at fixed storage location
+     * @notice Uses assembly to access storage at constant slot location
+     */
     function _getFreezePluginStorage() private pure returns (FreezePluginStorage storage $) {
         assembly {
             $.slot := FREEZE_PLUGIN_STORAGE_LOCATION
         }
     }
 
+    /**
+     * @dev Freezes the account and records freeze operation
+     * @param frozenBy Address initiating the freeze
+     * Emits IFreezePlugin__FreezeAccount event
+     * Requirements:
+     * - Account must not already be frozen
+     */
     function _freezeAccount(address frozenBy) internal {
         _requireNotFrozen();
         FreezePluginStorage storage $ = _getFreezePluginStorage();
@@ -111,6 +148,14 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
         emit IFreezePlugin__FreezeAccount(frozenBy);
     }
 
+    /**
+     * @dev Unfreezes the account and updates freeze record
+     * @param unfrozenBy Address initiating the unfreeze
+     * Emits IFreezePlugin__UnfreezeAccount event
+     * Requirements:
+     * - Account must be frozen
+     * - Must pass _checkUnfreezeAccount validation
+     */
     function _unfreezeAccount(address unfrozenBy) internal {
         _checkUnfreezeAccount(unfrozenBy);
         FreezePluginStorage storage $ = _getFreezePluginStorage();
@@ -121,22 +166,40 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
         emit IFreezePlugin__UnfreezeAccount(unfrozenBy);
     }
 
+    /**
+     * @dev Checks current freeze status
+     * @return bool True if account is frozen, false otherwise
+     */
     function _isFrozen() internal view returns (bool) {
         FreezePluginStorage storage $ = _getFreezePluginStorage();
         return $.frozen;
     }
 
+    /**
+     * @dev Requires account to be in frozen state
+     * Reverts with IFreezePlugin__AccountIsNotFrozen if not frozen
+     */
     function _requireFrozen() internal view {
         if (!this.isFrozen()) {
             revert IFreezePlugin__AccountIsNotFrozen();
         }
     }
 
+    /**
+     * @dev Requires account to be in unfrozen state
+     * Reverts with IFreezePlugin__AccountIsFrozen if frozen
+     */
     function _requireNotFrozen() internal view {
         if (this.isFrozen()) {
             revert IFreezePlugin__AccountIsFrozen();
         }
     }
 
+    /**
+     * @dev Virtual function for custom unfreeze validation logic
+     * @param unfrozenBy Address attempting to unfreeze
+     * @notice Must be implemented by inheriting contracts
+     * @notice Provides extensibility for custom freeze policies
+     */
     function _checkUnfreezeAccount(address unfrozenBy) internal view virtual;
 }

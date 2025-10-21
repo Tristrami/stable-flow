@@ -11,7 +11,7 @@ import {DeployOnMainChain} from "../../script/DeployOnMainChain.s.sol";
 import {DeployOnOtherChain} from "../../script/DeployOnOtherChain.s.sol";
 import {ConfigureTokenPool} from "../../script/ConfigureTokenPool.s.sol";
 import {Constants} from "../../script/util/Constants.sol";
-import {CCIPLocalSimulatorFork, Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
+import {CCIPLocalSimulatorFork} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract SFBridgeTest is Test, Constants {
@@ -124,11 +124,11 @@ contract SFBridgeTest is Test, Constants {
     function _setUpEthSepolia() private {
         ethSepoliaForkId = vm.createSelectFork("ethSepolia");
         DeployOnMainChain deployer = new DeployOnMainChain();
+        DeployHelper.DeployConfig memory deployConfig = deployer.getDeployConfig();
         (
             address sfTokenAddress, ,
             address sfTokenPoolAddress,
-            address sfBridgeAddress, , ,
-            DeployHelper.DeployConfig memory deployConfig
+            address sfBridgeAddress, ,
         ) = deployer.deploy();
         ethSepoliaData.sfToken = SFToken(sfTokenAddress);
         ethSepoliaData.sfTokenPool = SFTokenPool(sfTokenPoolAddress);
@@ -140,11 +140,11 @@ contract SFBridgeTest is Test, Constants {
     function _setUpAvaFuji() private {
         avaFujiForkId = vm.createSelectFork("avaFuji");
         DeployOnOtherChain deployer = new DeployOnOtherChain();
+        DeployHelper.DeployConfig memory deployConfig = deployer.getDeployConfig();
         (
             address sfTokenAddress,
             address sfTokenPoolAddress,
-            address sfBridgeAddress,
-            DeployHelper.DeployConfig memory deployConfig
+            address sfBridgeAddress
         ) = deployer.deploy();
         avaFujiData.sfToken = SFToken(sfTokenAddress);
         avaFujiData.sfTokenPool = SFTokenPool(sfTokenPoolAddress);

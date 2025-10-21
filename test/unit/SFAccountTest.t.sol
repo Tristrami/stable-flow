@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Vm} from "forge-std/Vm.sol";
-import {Test, console2} from "forge-std/Test.sol";
 import {IFreezePlugin} from "../../src/interfaces/IFreezePlugin.sol";
 import {IVaultPlugin} from "../../src/interfaces/IVaultPlugin.sol";
 import {ISocialRecoveryPlugin} from "../../src/interfaces/ISocialRecoveryPlugin.sol";
+import {ISFAccountFactory} from "../../src/interfaces/ISFAccountFactory.sol";
 import {BaseSFAccountPlugin} from "../../src/account/plugins/BaseSFAccountPlugin.sol";
 import {SFEngine} from "../../src/token/SFEngine.sol";
 import {SFAccount} from "../../src/account/SFAccount.sol";
@@ -17,14 +16,18 @@ import {Constants} from "../../script/util/Constants.sol";
 import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {Logs} from "../../script/util/Logs.sol";
+import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
+import "../../script/UserOperations.s.sol";
+
+import {Vm} from "forge-std/Vm.sol";
+import {Test, console2} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
 import {Ownable} from "@aave/v3/core/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
 import {IEntryPoint} from "account-abstraction/contracts/interfaces/IEntryPoint.sol";
 import {BaseAccount} from "account-abstraction/contracts/core/BaseAccount.sol";
-import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
-import "../../script/UserOperations.s.sol";
+import {CCIPLocalSimulatorFork} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
 contract SFAccountTest is Test, Constants {
 
@@ -35,7 +38,7 @@ contract SFAccountTest is Test, Constants {
     /*                           SFAccountFactory Events                          */
     /* -------------------------------------------------------------------------- */
 
-    event SFAccountFactory__CreateAccount(address indexed account, address indexed owner);
+    event ISFAccountFactory__CreateAccount(address indexed account, address indexed owner);
 
     /* -------------------------------------------------------------------------- */
     /*                              ISFAccount Events                             */
@@ -158,6 +161,7 @@ contract SFAccountTest is Test, Constants {
     /* -------------------------------------------------------------------------- */
 
     uint256 private constant INITIAL_USER_BALANCE = 100 ether;
+    uint256 private constant INITIAL_LINK_BALANCE = 1 * PRECISION_FACTOR;
     uint256 private constant INVEST_AMOUNT = 10 ether;
     uint256 private constant LIQUIDATOR_DEPOSIT_AMOUNT = 1000 ether;
     uint256 private constant DEFAULT_AMOUNT_COLLATERAL = 2 ether;
@@ -221,17 +225,21 @@ contract SFAccountTest is Test, Constants {
 
     function setUp() external {
         _setUpEthSepolia();
+        _clearAddresses();
     }
 
     function _setUpEthSepolia() private {
         $.forkId = vm.createSelectFork("ethSepolia");
         DeployOnMainChain deployer = new DeployOnMainChain();
+        DeployHelper.DeployConfig memory deployConfig = deployer.getDeployConfig();
+        // Request some link token
+        CCIPLocalSimulatorFork ccip = new CCIPLocalSimulatorFork();
+        ccip.requestLinkFromFaucet(deployConfig.account, INITIAL_LINK_BALANCE);
         (
             address sfTokenAddress, 
             address sfEngineAddress, , ,
             address sfAccountFactoryAddress,
-            address sfAccountBeaconAddress,
-            DeployHelper.DeployConfig memory deployConfig
+            address sfAccountBeaconAddress
         ) = deployer.deploy();
         $.sfEngine = SFEngine(sfEngineAddress);
         $.sfToken = SFToken(sfTokenAddress);
@@ -270,13 +278,22 @@ contract SFAccountTest is Test, Constants {
         vm.deal($.deployConfig.account, INITIAL_BALANCE);
     }
 
+    function _clearAddresses() private {
+        // On sepolia testnet, a create collision error will occur in KeeperRegistryLogicA2_1.registerUpkeep
+        // function while the nonce of KeeperRegistryLogicA2_1 is 1, so clear the code on this collision address
+        vm.etch(0xFc7d18305f17ABf863d8c60CE01a4977d9Bb663c, bytes(""));
+        vm.etch(0x0Eb6dEcbD322E944334FB0Cce4EBd99B48F6003F, bytes(""));
+        vm.etch(0x198af54f3Ef64CEB92BE2E8dD8fafb1E60306b70, bytes(""));
+        vm.etch(0x252add0BF9A5595e8943933bDfE52eC5a9304B39, bytes(""));
+    }
+
     /* -------------------------------------------------------------------------- */
     /*                              Create SF Account                             */
     /* -------------------------------------------------------------------------- */
 
     function test_Create_RevertWhen_InitializeSFAccountFactoryWithZeroMaxAccountAmount() public {
         SFAccountFactory factory = new SFAccountFactory();
-        vm.expectRevert(SFAccountFactory.SFAccountFactory__MaxAccountAmountCanNotBeZero.selector);
+        vm.expectRevert(ISFAccountFactory.ISFAccountFactory__MaxAccountAmountCanNotBeZero.selector);
         factory.initialize(
             $.deployConfig.entryPointAddress,
             address($.sfEngine),
@@ -311,7 +328,7 @@ contract SFAccountTest is Test, Constants {
                 maxGuardians: 5
             })
         );
-        vm.expectRevert(SFAccountFactory.SFAccountFactory__MaxAccountAmountCanNotBeZero.selector);
+        vm.expectRevert(ISFAccountFactory.ISFAccountFactory__MaxAccountAmountCanNotBeZero.selector);
         factory.reinitialize(
             2,
             0, 
@@ -347,7 +364,7 @@ contract SFAccountTest is Test, Constants {
         bytes32 salt = $.sfAccountFactory.getSFAccountSalt(owner);
         vm.expectRevert(
             abi.encodeWithSelector(
-                SFAccountFactory.SFAccountFactory__AccountLimitReached.selector, 
+                ISFAccountFactory.ISFAccountFactory__AccountLimitReached.selector, 
                 maxAccountAmount
             )
         );
@@ -369,7 +386,7 @@ contract SFAccountTest is Test, Constants {
         vm.prank(owner);
         IEntryPoint($.deployConfig.entryPointAddress).depositTo{value: 1 ether}(calculatedAccountAddress);
         vm.expectEmit(true, true, false, false);
-        emit SFAccountFactory__CreateAccount(calculatedAccountAddress, owner);
+        emit ISFAccountFactory__CreateAccount(calculatedAccountAddress, owner);
         vm.expectEmit(true, false, false, false);
         emit ISFAccount__AccountCreated(owner);
         createAccount.run(
@@ -2549,11 +2566,6 @@ contract SFAccountTest is Test, Constants {
     /* -------------------------------------------------------------------------- */
 
     function _createSFAccount(address account) private returns (address) {
-        // On sepolia testnet, a create collision error will occur in KeeperRegistryLogicA2_1.registerUpkeep
-        // function while the nonce of KeeperRegistryLogicA2_1 is 1, so clear the code on this collision address
-        vm.etch(0x198af54f3Ef64CEB92BE2E8dD8fafb1E60306b70, bytes(""));
-        vm.etch(0xFc7d18305f17ABf863d8c60CE01a4977d9Bb663c, bytes(""));
-        vm.etch(0x252add0BF9A5595e8943933bDfE52eC5a9304B39, bytes(""));
         CreateAccount createAccount = new CreateAccount();
         address calculatedAccountAddress = $.sfAccountFactory.calculateAccountAddress(
             address($.sfAccountBeacon), 
