@@ -51,14 +51,17 @@ contract ConfigHelper is Script {
         if (names.length != deployments.length) {
             revert DevOps__NameAndDeploymentsLengthNotMatch();
         }
-        string memory developments = "developments";
-        string memory development = "development";
+        string memory chainId = vm.toString(block.chainid);
+        // Key to identify root object
+        string memory developments = string.concat("developments");
+        // Key to identify deployment addresses object of specific chain id
+        string memory development = string.concat("development", chainId);
         string memory developmentJson;
         string memory developmentsJson;
         for (uint256 i = 0; i < names.length; i++) {
             developmentJson = development.serialize(names[i], deployments[i]);
         }
-        developmentsJson = developments.serialize(vm.toString(block.chainid), developmentJson);
+        developmentsJson = developments.serialize(chainId, developmentJson);
         developmentsJson.write(LATEST_DEPLOYMENT_FILE_PATH);
     }
 

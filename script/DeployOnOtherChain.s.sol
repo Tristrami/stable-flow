@@ -33,6 +33,7 @@ contract DeployOnOtherChain is BaseDeployment {
         config = deployConfig;
         (sfTokenAddress, sfTokenPoolAddress) = _deploySFTokenAndTokenPool();
         sfBridgeAddress = _deploySFBridge(sfTokenAddress);
+        _saveDeployment(sfTokenAddress, sfTokenPoolAddress, sfBridgeAddress);
     }
 
     function _deploySFTokenAndTokenPool() private returns (

@@ -74,9 +74,8 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         address automationRegistrarAddress;
         /// @dev Address of the Link Token contract
         address linkTokenAddress;
-        /// @dev Tracks Chainlink Automation upkeep IDs for each vault
-        /// @notice Maps vault addresses to their corresponding Chainlink upkeep IDs
-        mapping(address vault => uint256 upkeepId) upkeeps;
+        /// @dev Tracks Chainlink Automation upkeep ID for this vault
+        uint256 upkeepId;
     }
 
     /* -------------------------------------------------------------------------- */
@@ -559,10 +558,9 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
         bool topUpCurrentlyEnabled = $.customVaultConfig.autoTopUpEnabled;
         bool shouldEnableTopUp = customConfig.autoTopUpEnabled;
         if (!topUpCurrentlyEnabled && shouldEnableTopUp) {
-            uint256 upkeepId = $.upkeeps[address(this)];
-            if (upkeepId == 0) {
+            if ($.upkeepId == 0) {
                 address owner = this.getOwner();
-                upkeepId = AutomationRegistrarInterface($.automationRegistrarAddress).register(
+                $.upkeepId = AutomationRegistrarInterface($.automationRegistrarAddress).register(
                     this, 
                     owner, 
                     $.linkTokenAddress,
@@ -570,7 +568,6 @@ abstract contract VaultPlugin is IVaultPlugin, FreezePlugin, AutomationCompatibl
                     uint96(customConfig.upkeepLinkAmount),
                     uint32(customConfig.upkeepGasLimit)
                 );
-                $.upkeeps[address(this)] = upkeepId;
             }
         }
     }
