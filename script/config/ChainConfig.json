@@ -1,7 +1,7 @@
 {
-  "mainChain": 31337,
+  "mainChain": 11155111,
   "supportedChains": [
-    31337,
-    31338
+    11155111,
+    43113
   ]
 }

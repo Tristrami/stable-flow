@@ -123,6 +123,23 @@ contract SFBridge is ISFBridge, OwnableUpgradeable, UUPSUpgradeable, ERC165 {
         messageId = routerClient.ccipSend(destinationChainSelector, message);
     }
 
+    /// @inheritdoc ISFBridge
+    function getFee(
+        uint256 destinationChainId,
+        address receiver,
+        uint256 amount
+    ) external view override returns (uint256 fee) {
+        uint64 destinationChainSelector = uint64(supportedChains.get(destinationChainId));
+        Client.EVM2AnyMessage memory message = _createCCIPMessage(
+            address(localSFToken),
+            linkTokenAddress,
+            receiver,
+            amount
+        );
+        IRouterClient routerClient = IRouterClient(routerAddress);
+        return routerClient.getFee(destinationChainSelector, message);
+    }
+
     /// @inheritdoc ERC165
     function supportsInterface(bytes4 interfaceId) public view override(ERC165, IERC165) returns (bool) {
         return interfaceId == type(ISFBridge).interfaceId || super.supportsInterface(interfaceId);

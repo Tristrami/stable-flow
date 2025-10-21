@@ -19,20 +19,20 @@ contract BaseDeployment is Script {
     string[] internal names;
     address[] internal deployments;
     DeployHelper internal deployHelper;
+    DeployHelper.DeployConfig internal deployConfig;
     ConfigHelper internal configHelper;
     ConfigHelper.ChainConfig internal chainConfig;
     Register internal register;
 
     constructor() {
         deployHelper = new DeployHelper();
+        deployConfig = deployHelper.getDeployConfig();
         configHelper = new ConfigHelper();
-        register = new Register();
         chainConfig = configHelper.getChainConfig();
-        register = new Register();
+        register = deployConfig.ccipRegister;
     }
 
     function _deploySFBridge(address sfTokenAddress) internal returns (address sfBridgeAddress) {
-        DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         uint256 numOfSupportedChains = chainConfig.supportedChains.length;
         uint64[] memory chainSelectors = new uint64[](numOfSupportedChains);
         for (uint256 i = 0; i < numOfSupportedChains; i++) {

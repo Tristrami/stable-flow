@@ -8,8 +8,10 @@ import {SFBridge} from "../src/bridge/SFBridge.sol";
 import {DeployHelper} from "./util/DeployHelper.sol";
 import {ConfigHelper} from "./util/ConfigHelper.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 import {BaseDeployment} from "./BaseDeployment.s.sol";
+import {Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
+import {RegistryModuleOwnerCustom} from "@chainlink/contracts/src/v0.8/ccip/tokenAdminRegistry/RegistryModuleOwnerCustom.sol";
+import {TokenAdminRegistry} from "@chainlink/contracts/src/v0.8/ccip/tokenAdminRegistry/TokenAdminRegistry.sol";
 
 contract DeployOnOtherChain is BaseDeployment {
 
@@ -25,8 +27,10 @@ contract DeployOnOtherChain is BaseDeployment {
     function deploy() public returns (
         address sfTokenAddress,
         address sfTokenPoolAddress,
-        address sfBridgeAddress
+        address sfBridgeAddress,
+        DeployHelper.DeployConfig memory config
     ) {
+        config = deployConfig;
         (sfTokenAddress, sfTokenPoolAddress) = _deploySFTokenAndTokenPool();
         sfBridgeAddress = _deploySFBridge(sfTokenAddress);
     }
@@ -35,11 +39,11 @@ contract DeployOnOtherChain is BaseDeployment {
         address sfTokenAddress, 
         address sfTokenPoolAddress
     ) {
-        DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         Register.NetworkDetails memory networkDetails = register.getNetworkDetails(block.chainid);
         vm.startBroadcast(deployConfig.account);
         SFToken sfToken = new SFToken();
         SFToken sfTokenProxy = SFToken(address(new ERC1967Proxy(address(sfToken), "")));
+        sfTokenProxy.initialize();
         SFTokenPool sfTokenPool = new SFTokenPool(
             chainConfig.mainChainId,
             sfTokenProxy,
@@ -47,7 +51,15 @@ contract DeployOnOtherChain is BaseDeployment {
             networkDetails.rmnProxyAddress,
             networkDetails.routerAddress
         );
-        sfTokenProxy.initialize();
+        // Set token admin as the token owner
+        RegistryModuleOwnerCustom(
+            networkDetails.registryModuleOwnerCustomAddress
+        ).registerAdminViaOwner(address(sfTokenProxy));
+        // Complete the registration process
+        TokenAdminRegistry tokenAdminRegistry = TokenAdminRegistry(networkDetails.tokenAdminRegistryAddress);
+        TokenAdminRegistry(networkDetails.tokenAdminRegistryAddress).acceptAdminRole(address(sfTokenProxy));
+        // Link token to the pool
+        tokenAdminRegistry.setPool(address(sfTokenProxy), address(sfTokenPool));
         sfTokenProxy.addMinter(address(sfTokenPool));
         vm.stopBroadcast();
         return (address(sfTokenProxy), address(sfTokenPool));

@@ -12,6 +12,7 @@ import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
 import {OracleLib, AggregatorV3Interface} from "../../src/libraries/OracleLib.sol";
 import {Logs} from "../../script/util/Logs.sol";
+
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolDataProvider} from "aave-address-book/src/AaveV3.sol";
 import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
@@ -37,9 +38,7 @@ contract SFEngineTest is Test, Constants {
 
     address private user = makeAddr("user");
     address private randomUser = makeAddr("randomUser");
-    TestData private localData;
-    TestData private sepoliaData;
-    TestData private $; // Current active test data
+    TestData private $;
 
     address[] private tokenAddresses;
     address[] private priceFeedAddresses;
@@ -68,62 +67,28 @@ contract SFEngineTest is Test, Constants {
         _;
     }
 
-    modifier localTest() {
-        $ = localData;
-        vm.selectFork($.forkId);
-        _;
-    }
-
-    modifier ethSepoliaTest() {
-        $ = sepoliaData;
-        vm.selectFork($.forkId);
-        _;
-    }
-
     function setUp() external {
-        _setUpLocal();
         _setUpEthSepolia();
     }
 
-    function _setUpLocal() private {
-        localData.forkId = vm.createSelectFork("local");
-        DeployOnMainChain deployer = new DeployOnMainChain();
-        (
-            address sfTokenAddress, 
-            address sfEngineAddress, , , , ,
-            DeployHelper.DeployConfig memory deployConfig
-        ) = deployer.deploy();
-        localData.sfEngine = SFEngine(sfEngineAddress);
-        localData.sfToken = SFToken(sfTokenAddress);
-        localData.deployConfig = deployConfig;
-        IERC20 weth = IERC20(localData.deployConfig.wethTokenAddress);
-        IERC20 wbtc = IERC20(localData.deployConfig.wbtcTokenAddress);
-        vm.startPrank(deployConfig.account);
-        weth.transfer(user, INITIAL_USER_BALANCE);
-        wbtc.transfer(user, INITIAL_USER_BALANCE);
-        weth.transfer(randomUser, INITIAL_USER_BALANCE);
-        wbtc.transfer(randomUser, INITIAL_USER_BALANCE);
-        vm.stopPrank();
-    }
-
     function _setUpEthSepolia() private {
-        sepoliaData.forkId = vm.createSelectFork("ethSepolia");
+        $.forkId = vm.createSelectFork("ethSepolia");
         DeployOnMainChain deployer = new DeployOnMainChain();
         (
             address sfTokenAddress, 
             address sfEngineAddress, , , , ,
             DeployHelper.DeployConfig memory deployConfig
         ) = deployer.deploy();
-        sepoliaData.sfEngine = SFEngine(sfEngineAddress);
-        sepoliaData.sfToken = SFToken(sfTokenAddress);
-        sepoliaData.deployConfig = deployConfig;
-        MockERC20 weth = MockERC20(sepoliaData.deployConfig.wethTokenAddress);
-        MockERC20 wbtc = MockERC20(sepoliaData.deployConfig.wbtcTokenAddress);
-        vm.startPrank(Ownable(sepoliaData.deployConfig.wethTokenAddress).owner());
+        $.sfEngine = SFEngine(sfEngineAddress);
+        $.sfToken = SFToken(sfTokenAddress);
+        $.deployConfig = deployConfig;
+        MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
+        MockERC20 wbtc = MockERC20($.deployConfig.wbtcTokenAddress);
+        vm.startPrank(Ownable($.deployConfig.wethTokenAddress).owner());
         weth.mint(user, INITIAL_USER_BALANCE);
         weth.mint(randomUser, INITIAL_USER_BALANCE);
         vm.stopPrank();
-        vm.startPrank(Ownable(sepoliaData.deployConfig.wbtcTokenAddress).owner());
+        vm.startPrank(Ownable($.deployConfig.wbtcTokenAddress).owner());
         wbtc.mint(user, INITIAL_USER_BALANCE);
         wbtc.mint(randomUser, INITIAL_USER_BALANCE);
         vm.stopPrank();
@@ -131,14 +96,14 @@ contract SFEngineTest is Test, Constants {
         vm.startPrank(randomUser);
         weth.approve(deployConfig.aavePoolAddress, INITIAL_USER_BALANCE);
         IPool(deployConfig.aavePoolAddress).supply(
-            sepoliaData.deployConfig.wethTokenAddress, 
+            $.deployConfig.wethTokenAddress, 
             INITIAL_USER_BALANCE, 
             randomUser, 
             0
         );
         wbtc.approve(deployConfig.aavePoolAddress, INITIAL_USER_BALANCE);
         IPool(deployConfig.aavePoolAddress).supply(
-            sepoliaData.deployConfig.wbtcTokenAddress, 
+            $.deployConfig.wbtcTokenAddress, 
             INITIAL_USER_BALANCE, 
             randomUser, 
             0
@@ -146,11 +111,11 @@ contract SFEngineTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_SFEngineIsMinter() public localTest {
+    function test_SFEngineIsMinter() public view {
         assertTrue($.sfToken.isMinter(address($.sfEngine)));
     }
 
-    function test_MinterCanMintAndBurn() public localTest {
+    function test_MinterCanMintAndBurn() public {
         address minter = address($.sfEngine);
         uint256 amount = 1 * PRECISION_FACTOR;
         uint256 startingSFBalance = $.sfToken.balanceOf(user);
@@ -162,7 +127,7 @@ contract SFEngineTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_RevertWhen_RandomUserMintAndBurnSFToken() public localTest {
+    function test_RevertWhen_RandomUserMintAndBurnSFToken() public {
         uint256 amount = 1 * PRECISION_FACTOR;
         vm.startPrank(randomUser);
         vm.expectRevert(SFToken.SFToken__OnlyMinter.selector);
@@ -172,7 +137,7 @@ contract SFEngineTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function testGetTokenUsdPrice() public localTest {
+    function testGetTokenUsdPrice() public view {
         assertEq(
             AggregatorV3Interface($.deployConfig.wethPriceFeedAddress).getPrice(),
             WETH_USD_PRICE.convert()
@@ -183,7 +148,7 @@ contract SFEngineTest is Test, Constants {
         );
     }
 
-    function testGetTokenValue() public localTest {
+    function testGetTokenValue() public view {
         uint256 amountToken = 2 ether;
         assertEq(
             AggregatorV3Interface($.deployConfig.wethPriceFeedAddress).getTokenValue(amountToken),
@@ -195,7 +160,7 @@ contract SFEngineTest is Test, Constants {
         );
     }
 
-    function testGetTokenAmountsForUsd() public localTest {
+    function testGetTokenAmountsForUsd() public view {
         uint256 amountEth = AggregatorV3Interface(
             $.deployConfig.wethPriceFeedAddress
         ).getTokensForValue(2 * WETH_USD_PRICE.convert());
@@ -207,7 +172,7 @@ contract SFEngineTest is Test, Constants {
         assertEq(amountBtc, expectedTokenAmount.convert(0, PRECISION));
     }
 
-    function testGetSFTokenAmountByCollateral() public localTest {
+    function testGetSFTokenAmountByCollateral() public view {
         uint256 ethAmount = 2 ether;
         uint256 collateralRatio = 2 * PRECISION_FACTOR;
         uint256 sfAmount = $.sfEngine.calculateSFTokensByCollateral($.deployConfig.wethTokenAddress, ethAmount, collateralRatio);
@@ -216,7 +181,7 @@ contract SFEngineTest is Test, Constants {
         assertEq(sfAmount, expectedSFAmount);
     }
 
-    function test_RevertWhen_TokenAddressAndPriceFeedAddressLengthNotMatch() public localTest {
+    function test_RevertWhen_TokenAddressAndPriceFeedAddressLengthNotMatch() public {
         MockERC20 token = new MockERC20("TEST", "TEST", msg.sender, 10);
         // Token address length < price feed address length
         tokenAddresses = [address(0)];
@@ -232,7 +197,7 @@ contract SFEngineTest is Test, Constants {
         engine.initialize(address(token), address(0), 0, 0, 0, tokenAddresses, priceFeedAddresses);
     }
 
-    function test_RevertWhen_DepositCollateralParamIsInvalid() public localTest {
+    function test_RevertWhen_DepositCollateralParamIsInvalid() public {
         // Zero address
         vm.expectRevert(abi.encodeWithSelector(ISFEngine.ISFEngine__CollateralNotSupported.selector, address(0)));
         $.sfEngine.depositCollateralAndMintSFToken(address(0), 1 ether, 1 ether);
@@ -245,7 +210,7 @@ contract SFEngineTest is Test, Constants {
         $.sfEngine.depositCollateralAndMintSFToken(address(token), 1 ether, 1 ether);
     }
 
-    function test_RevertWhen_CollateralRatioIsBroken() public ethSepoliaTest {
+    function test_RevertWhen_CollateralRatioIsBroken() public {
         // This assumes the collateral ratio is 1, eg. 100$ collateral => 100$ sf
         uint256 amountCollateral = 1 ether;
         uint256 amountToMint =  AggregatorV3Interface($.deployConfig.wethPriceFeedAddress).getTokenValue(amountCollateral);
@@ -261,7 +226,7 @@ contract SFEngineTest is Test, Constants {
         $.sfEngine.depositCollateralAndMintSFToken(address(weth), amountCollateral, amountToMint);
     }
 
-    function testDepositWithEnoughCollateral() public ethSepoliaTest {
+    function testDepositWithEnoughCollateral() public {
         // Arrange data
         IERC20 weth = IERC20($.deployConfig.wethTokenAddress);
         uint256 amountCollateral = 2 ether;
@@ -304,7 +269,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_RedeemAmountExceedsDeposited() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         vm.startPrank(user);
@@ -331,7 +295,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_AmountSFToBurnExceedsUserBalance()
         public
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
     {
         // Burn all tokens from user
@@ -348,7 +311,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_DebtToCoverExceedsUserDebt() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
     {
         uint256 sfBalance = $.sfToken.balanceOf(user);
@@ -363,7 +325,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_RedeemBreaksCollateralRatio() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         uint256 amountCollateralToRedeem = DEFAULT_AMOUNT_COLLATERAL / 2;
@@ -404,7 +365,7 @@ contract SFEngineTest is Test, Constants {
 
     function testRedeemCollateral() 
         public 
-        ethSepoliaTest 
+        
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         IERC20 weth = IERC20($.deployConfig.wethTokenAddress);
@@ -471,7 +432,7 @@ contract SFEngineTest is Test, Constants {
 
     function testRedeemAllCollateral() 
         public 
-        ethSepoliaTest 
+        
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         IERC20 weth = IERC20($.deployConfig.wethTokenAddress);
@@ -524,7 +485,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_LiquidateWhenUserCollateralRatioIsNotBroken()
         public
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
     {
         // Mint some token to liquidator
@@ -544,7 +504,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_RevertWhen_DebtToCoverExceedsLiquidatorBalance()
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
     {
         uint256 userDebt = $.sfEngine.getSFDebt(user);
@@ -567,7 +526,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_LiquidateWhen_DebtToCoverLessThanUserCollateral() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
@@ -627,7 +585,6 @@ contract SFEngineTest is Test, Constants {
 
     function test_LiquidateWhen_DebtToCoverExceedsUserCollateral() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
@@ -685,7 +642,6 @@ contract SFEngineTest is Test, Constants {
 
     function testHarvestSingleAsset() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO) 
     {
         address asset = $.deployConfig.wethTokenAddress;
@@ -725,7 +681,6 @@ contract SFEngineTest is Test, Constants {
 
     function testHarvestAll() 
         public 
-        ethSepoliaTest
         depositedCollateral($, $.deployConfig.wethTokenAddress, DEFAULT_COLLATERAL_RATIO)
         depositedCollateral($, $.deployConfig.wbtcTokenAddress, DEFAULT_COLLATERAL_RATIO)
     {
@@ -795,14 +750,6 @@ contract SFEngineTest is Test, Constants {
         assertEq(endingAWbtcTokenBalance, startingAWbtcBalance + wbtcInterest - wbtcAmountWithdrawn);
         assertEq($.sfEngine.getAllInvestmentGainInUsd(), wethInvestGainInUsd + wbtcInvestGainInUsd);
     }
-
-
-    function testCalculateStorageLocation() public localTest {
-        bytes memory name = "stableflow.storage.BridgePlugin";
-        bytes32 b = keccak256(abi.encode(uint256(keccak256(name)) - 1)) & ~bytes32(uint256(0xff));
-        console2.logBytes32(b);
-    }
-
 }
 
 library Precisions {

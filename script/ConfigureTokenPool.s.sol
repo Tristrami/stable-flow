@@ -47,7 +47,7 @@ contract ConfigureTokenPool is Script {
         uint128 outboundRateLimiterCapacity,
         uint128 outboundRateLimiterRate
     ) public {
-        console2.log("Start to configure token pool ...");
+        console2.log("Start to configure token pool, chian id:", block.chainid);
         ConfigHelper.PoolConfig memory poolConfig = ConfigHelper.PoolConfig({
         remoteChainSelector: remoteChainSelector,
             allowed: allowed,

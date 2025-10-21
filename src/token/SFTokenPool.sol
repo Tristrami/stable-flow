@@ -10,7 +10,7 @@ contract SFTokenPool is TokenPool {
 
     error SFTokenPool__TransferFailed();
     error SFTokenPool__ReleaseAmountExceedsLocked(uint256 amountToRelease, uint256 amountLocked);
-    error SFTokenPool__InsufficientRN(uint256 balance, uint256 amountRequired);
+    error SFTokenPool__InsufficientSF(uint256 balance, uint256 amountRequired);
     
     event SFTokenPool__Lock(address indexed user, uint256 indexed amount);
     event SFTokenPool__Release(address indexed user, uint256 indexed amount);
@@ -59,9 +59,9 @@ contract SFTokenPool is TokenPool {
         address receiver = releaseOrMintIn.receiver;
         uint256 amount = releaseOrMintIn.amount;
         if (block.chainid == i_mainChainId) {
-            uint256 rnBalance = i_sfToken.balanceOf(address(this));
-            if (rnBalance < amount) {
-                revert SFTokenPool__InsufficientRN(rnBalance, amount);
+            uint256 sfBalance = i_sfToken.balanceOf(address(this));
+            if (sfBalance < amount) {
+                revert SFTokenPool__InsufficientSF(sfBalance, amount);
             }
             emit SFTokenPool__Release(receiver, amount);
             i_sfToken.transfer(receiver, amount);

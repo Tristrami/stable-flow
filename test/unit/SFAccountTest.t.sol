@@ -171,22 +171,8 @@ contract SFAccountTest is Test, Constants {
     address private guardian1 = vm.rememberKey(0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6);
     address private guardian2 = vm.rememberKey(0xdbda1821b80551c9d65939329250298aa3472ba22feea921c0cf5d620ea67b97);
     address private guardian3 = vm.rememberKey(0x4bbbf85ce3377467afe5d46f804f221813b2bb87f24d81f60f1fcdbf7cbf4356);
-    TestData private localData;
-    TestData private sepoliaData;
-    TestData private $; // Current active test data
     address[] private guardians;
-
-    modifier localTest() {
-        $ = localData;
-        vm.selectFork($.forkId);
-        _;
-    }
-
-    modifier ethSepoliaTest() {
-        $ = sepoliaData;
-        vm.selectFork($.forkId);
-        _;
-    }
+    TestData private $;
 
     modifier accountCreated() {
         address sfAccountAddress = $.sfAccountFactory.calculateAccountAddress(
@@ -234,38 +220,11 @@ contract SFAccountTest is Test, Constants {
     }
 
     function setUp() external {
-        _setUpLocal();
         _setUpEthSepolia();
     }
 
-    function _setUpLocal() private {
-        localData.forkId = vm.createSelectFork("local");
-        DeployOnMainChain deployer = new DeployOnMainChain();
-        (
-            address sfTokenAddress, 
-            address sfEngineAddress, , ,
-            address sfAccountFactoryAddress,
-            address sfAccountBeaconAddress,
-            DeployHelper.DeployConfig memory deployConfig
-        ) = deployer.deploy();
-        localData.sfEngine = SFEngine(sfEngineAddress);
-        localData.sfToken = SFToken(sfTokenAddress);
-        localData.sfAccountFactory = SFAccountFactory(sfAccountFactoryAddress);
-        localData.sfAccountBeacon = UpgradeableBeacon(sfAccountBeaconAddress);
-        localData.deployConfig = deployConfig;
-        IERC20 weth = IERC20(localData.deployConfig.wethTokenAddress);
-        IERC20 wbtc = IERC20(localData.deployConfig.wbtcTokenAddress);
-        IERC20 link = IERC20(localData.deployConfig.linkTokenAddress);
-        vm.startPrank(deployConfig.account);
-        weth.transfer(user, INITIAL_USER_BALANCE);
-        wbtc.transfer(user, INITIAL_USER_BALANCE);
-        link.transfer(user, INITIAL_USER_BALANCE);
-        vm.stopPrank();
-        vm.deal(deployConfig.account, INITIAL_BALANCE);
-    }
-
     function _setUpEthSepolia() private {
-        sepoliaData.forkId = vm.createSelectFork("ethSepolia");
+        $.forkId = vm.createSelectFork("ethSepolia");
         DeployOnMainChain deployer = new DeployOnMainChain();
         (
             address sfTokenAddress, 
@@ -274,19 +233,19 @@ contract SFAccountTest is Test, Constants {
             address sfAccountBeaconAddress,
             DeployHelper.DeployConfig memory deployConfig
         ) = deployer.deploy();
-        sepoliaData.sfEngine = SFEngine(sfEngineAddress);
-        sepoliaData.sfToken = SFToken(sfTokenAddress);
-        sepoliaData.sfAccountFactory = SFAccountFactory(sfAccountFactoryAddress);
-        sepoliaData.sfAccountBeacon = UpgradeableBeacon(sfAccountBeaconAddress);
-        sepoliaData.deployConfig = deployConfig;
-        MockERC20 weth = MockERC20(sepoliaData.deployConfig.wethTokenAddress);
-        MockERC20 wbtc = MockERC20(sepoliaData.deployConfig.wbtcTokenAddress);
-        vm.startPrank(Ownable(sepoliaData.deployConfig.wethTokenAddress).owner());
+        $.sfEngine = SFEngine(sfEngineAddress);
+        $.sfToken = SFToken(sfTokenAddress);
+        $.sfAccountFactory = SFAccountFactory(sfAccountFactoryAddress);
+        $.sfAccountBeacon = UpgradeableBeacon(sfAccountBeaconAddress);
+        $.deployConfig = deployConfig;
+        MockERC20 weth = MockERC20($.deployConfig.wethTokenAddress);
+        MockERC20 wbtc = MockERC20($.deployConfig.wbtcTokenAddress);
+        vm.startPrank(Ownable($.deployConfig.wethTokenAddress).owner());
         weth.mint(user, INITIAL_USER_BALANCE);
         weth.mint(user, 2 * INITIAL_USER_BALANCE);
         weth.mint(deployConfig.account, INITIAL_USER_BALANCE);
         vm.stopPrank();
-        vm.startPrank(Ownable(sepoliaData.deployConfig.wbtcTokenAddress).owner());
+        vm.startPrank(Ownable($.deployConfig.wbtcTokenAddress).owner());
         wbtc.mint(user, INITIAL_USER_BALANCE);
         wbtc.mint(user, 2 * INITIAL_USER_BALANCE);
         wbtc.mint(deployConfig.account, INITIAL_USER_BALANCE);
@@ -295,27 +254,27 @@ contract SFAccountTest is Test, Constants {
         vm.startPrank(user);
         weth.approve(deployConfig.aavePoolAddress, INITIAL_USER_BALANCE);
         IPool(deployConfig.aavePoolAddress).supply(
-            sepoliaData.deployConfig.wethTokenAddress, 
+            $.deployConfig.wethTokenAddress, 
             INITIAL_USER_BALANCE, 
             user, 
             0
         );
         wbtc.approve(deployConfig.aavePoolAddress, INITIAL_USER_BALANCE);
         IPool(deployConfig.aavePoolAddress).supply(
-            sepoliaData.deployConfig.wbtcTokenAddress, 
+            $.deployConfig.wbtcTokenAddress, 
             INITIAL_USER_BALANCE, 
             user, 
             0
         );
         vm.stopPrank();
-        vm.deal(localData.deployConfig.account, INITIAL_BALANCE);
+        vm.deal($.deployConfig.account, INITIAL_BALANCE);
     }
 
     /* -------------------------------------------------------------------------- */
     /*                              Create SF Account                             */
     /* -------------------------------------------------------------------------- */
 
-    function test_Create_RevertWhen_InitializeSFAccountFactoryWithZeroMaxAccountAmount() localTest public {
+    function test_Create_RevertWhen_InitializeSFAccountFactoryWithZeroMaxAccountAmount() public {
         SFAccountFactory factory = new SFAccountFactory();
         vm.expectRevert(SFAccountFactory.SFAccountFactory__MaxAccountAmountCanNotBeZero.selector);
         factory.initialize(
@@ -335,7 +294,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Create_RevertWhen_ReinitializeSFAccountFactoryWithZeroMaxAccountAmount() localTest public {
+    function test_Create_RevertWhen_ReinitializeSFAccountFactoryWithZeroMaxAccountAmount() public {
         SFAccountFactory factory = new SFAccountFactory();
         factory.initialize(
             $.deployConfig.entryPointAddress,
@@ -366,7 +325,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Create_RevertWhen_AccountAmountExceedsMaxAmount() localTest public {
+    function test_Create_RevertWhen_AccountAmountExceedsMaxAmount() public {
         address owner = $.deployConfig.account;
         uint256 maxAccountAmount = $.sfAccountFactory.getMaxAccountAmount();
         IVaultPlugin.CustomVaultConfig memory vaultConfig = IVaultPlugin.CustomVaultConfig({
@@ -395,7 +354,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccountFactory.createSFAccount(owner, salt, vaultConfig, recoveryConfig);
     }
 
-    function test_Create_CreateAccount() public ethSepoliaTest {
+    function test_Create_CreateAccount() public {
         address owner = $.deployConfig.account;
         address calculatedAccountAddress = $.sfAccountFactory.calculateAccountAddress(
             address($.sfAccountBeacon), 
@@ -430,12 +389,12 @@ contract SFAccountTest is Test, Constants {
     /*                           Execute / Execute Batch                          */
     /* -------------------------------------------------------------------------- */
 
-    function test_Execute_Revert() public localTest accountCreated {
+    function test_Execute_Revert() public accountCreated {
         vm.expectRevert(ISFAccount.ISFAccount__OperationNotSupported.selector);
         $.sfAccount.execute(address(0), 0, "");
     }
 
-    function test_ExecuteBatch_Revert() public localTest accountCreated {
+    function test_ExecuteBatch_Revert() public accountCreated {
         vm.expectRevert(ISFAccount.ISFAccount__OperationNotSupported.selector);
         $.sfAccount.executeBatch(new BaseAccount.Call[](0));
     }
@@ -444,12 +403,12 @@ contract SFAccountTest is Test, Constants {
     /*                              Freeze / Unfreeze                             */
     /* -------------------------------------------------------------------------- */
 
-    function test_Freeze_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Freeze_RevertWhen_NotFromEntryPoint() public accountCreated {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.freeze();
     }
 
-    function test_Freeze_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+    function test_Freeze_RevertWhen_AccountIsFrozen() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
@@ -457,7 +416,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Freeze_FreezeAccount() public localTest accountCreated {
+    function test_Freeze_FreezeAccount() public accountCreated {
         vm.expectEmit(true, false, false, false);
         emit IFreezePlugin.IFreezePlugin__FreezeAccount(address($.sfAccount));
         vm.prank($.deployConfig.entryPointAddress);
@@ -470,12 +429,12 @@ contract SFAccountTest is Test, Constants {
         assertEq(latestRecord.isUnfozen, false);
     }
 
-    function test_Unfreeze_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Unfreeze_RevertWhen_NotFromEntryPoint() public accountCreated {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.unfreeze();
     }
 
-    function test_Unfreeze_RevertWhen_AccountIsUnfrozen() public localTest accountCreated {
+    function test_Unfreeze_RevertWhen_AccountIsUnfrozen() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         $.sfAccount.unfreeze();
@@ -484,7 +443,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Unfreeze_UnfreezeAccount() public localTest accountCreated {
+    function test_Unfreeze_UnfreezeAccount() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectEmit(true, false, false, false);
@@ -505,7 +464,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateVault_RevertWhen_TopUpThresholdLessThanMinCollateralRatio() 
         public 
-        localTest 
         accountCreated 
     {
         uint256 autoTopUpThreshold = 1 * PRECISION_FACTOR;
@@ -529,7 +487,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateVault_RevertWhen_CustomCollateralRatioLessThanMinCollateralRatio() 
         public 
-        localTest 
         accountCreated 
     {
         uint256 collateralRatio = 1 * PRECISION_FACTOR;
@@ -551,7 +508,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.updateCustomVaultConfig(customConfig);
     }
 
-    function test_UpdateVault_DisableAutoTopUp() public ethSepoliaTest accountCreated {
+    function test_UpdateVault_DisableAutoTopUp() public accountCreated {
         uint256 collateralRatio = 4 * PRECISION_FACTOR;
         uint256 autoTopUpThreshold = collateralRatio;
         IVaultPlugin.CustomVaultConfig memory config = $.sfAccount.getCustomVaultConfig();
@@ -574,7 +531,7 @@ contract SFAccountTest is Test, Constants {
         assertEq(updatedConfig.autoTopUpThreshold, autoTopUpThreshold);
     }
 
-    function test_UpdateVault_EnableAutoTopUp() public ethSepoliaTest {
+    function test_UpdateVault_EnableAutoTopUp() public {
         address owner = $.deployConfig.account;
         uint256 collateralRatio = 4 * PRECISION_FACTOR;
         uint256 autoTopUpThreshold = collateralRatio;
@@ -642,12 +599,12 @@ contract SFAccountTest is Test, Constants {
     /*                            Deposit to SF Account                           */
     /* -------------------------------------------------------------------------- */
 
-    function test_Deposit_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Deposit_RevertWhen_NotFromEntryPoint() public accountCreated {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.deposit($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
     }
 
-    function test_Deposit_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+    function test_Deposit_RevertWhen_AccountIsFrozen() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
@@ -655,7 +612,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Deposit_RevertWhen_CollateralAddressIsZero() public localTest accountCreated {
+    function test_Deposit_RevertWhen_CollateralAddressIsZero() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -666,13 +623,13 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.deposit(address(0), 1 * PRECISION_FACTOR);
     }
 
-    function test_Deposit_RevertWhen_AmountToDepositIsZero() public localTest accountCreated {
+    function test_Deposit_RevertWhen_AmountToDepositIsZero() public accountCreated {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.deposit($.deployConfig.wethTokenAddress, 0);
     }
 
-    function test_Deposit_RevertWhen_CollateralNotSupported() public localTest accountCreated {
+    function test_Deposit_RevertWhen_CollateralNotSupported() public accountCreated {
         address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -684,7 +641,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.deposit(collateral, 1 * PRECISION_FACTOR);
     }
 
-    function test_Deposit_DepositToAccount() public localTest accountCreated {
+    function test_Deposit_DepositToAccount() public accountCreated {
         address collateral = $.deployConfig.wethTokenAddress;
         address account = $.deployConfig.account;
         address sfAccount = address($.sfAccount);
@@ -723,12 +680,12 @@ contract SFAccountTest is Test, Constants {
     /*                          Withdraw from SF Account                          */
     /* -------------------------------------------------------------------------- */
 
-    function test_Withdraw_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_NotFromEntryPoint() public accountCreated {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.withdraw($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
     }
 
-    function test_Withdraw_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_AccountIsFrozen() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
@@ -736,7 +693,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Withdraw_RevertWhen_CollateralAddressIsZero() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_CollateralAddressIsZero() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -747,13 +704,13 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.withdraw(address(0), 1 * PRECISION_FACTOR);
     }
 
-    function test_Withdraw_RevertWhen_AmountToWithdrawIsZero() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_AmountToWithdrawIsZero() public accountCreated {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.withdraw($.deployConfig.wethTokenAddress, 0);
     }
 
-    function test_Withdraw_RevertWhen_CollateralNotSupported() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_CollateralNotSupported() public accountCreated {
         address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -765,7 +722,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.withdraw(collateral, 1 * PRECISION_FACTOR);
     }
 
-    function test_Withdraw_RevertWhen_AmountExceedsBalance() public localTest accountCreated {
+    function test_Withdraw_RevertWhen_AmountExceedsBalance() public accountCreated {
         uint256 amountToDeposit = 1 * PRECISION_FACTOR;
         uint256 amountToWithdraw = amountToDeposit + 1 * PRECISION_FACTOR;
         address collateral = $.deployConfig.wethTokenAddress;
@@ -786,7 +743,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Withdraw_WithdrawFromAccount() public localTest accountCreated deposited {
+    function test_Withdraw_WithdrawFromAccount() public accountCreated deposited {
         // amount to withdraw is equal to amount deposited
         uint256 amountToWithdraw = 1 * PRECISION_FACTOR;
         address collateral = $.deployConfig.wethTokenAddress;
@@ -813,7 +770,7 @@ contract SFAccountTest is Test, Constants {
         assertEq(IERC20(collateral).balanceOf(sfAccount), startingSFAccountBalance - amountToWithdraw);
     }
 
-    function test_Withdraw_WithdrawAllCollaterals() public localTest accountCreated deposited {
+    function test_Withdraw_WithdrawAllCollaterals() public accountCreated deposited {
         // amount to withdraw is equal to amount deposited
         uint256 amountToWithdraw = INITIAL_USER_BALANCE;
         address collateral = $.deployConfig.wethTokenAddress;
@@ -846,12 +803,12 @@ contract SFAccountTest is Test, Constants {
     /*                            Invest to SF Protocol                           */
     /* -------------------------------------------------------------------------- */
 
-    function test_Invest_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Invest_RevertWhen_NotFromEntryPoint() public accountCreated {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.invest($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
     }
 
-    function test_Invest_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+    function test_Invest_RevertWhen_AccountIsFrozen() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
@@ -859,7 +816,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Invest_RevertWhen_CollateralAddressIsZero() public localTest accountCreated {
+    function test_Invest_RevertWhen_CollateralAddressIsZero() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -870,13 +827,13 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.invest(address(0), 1 * PRECISION_FACTOR);
     }
 
-    function test_Invest_RevertWhen_AmountToInvestIsZero() public localTest accountCreated {
+    function test_Invest_RevertWhen_AmountToInvestIsZero() public accountCreated {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.invest($.deployConfig.wethTokenAddress, 0);
     }
 
-    function test_Invest_RevertWhen_CollateralNotSupported() public localTest accountCreated {
+    function test_Invest_RevertWhen_CollateralNotSupported() public accountCreated {
         address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -888,7 +845,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.invest(collateral, 1 * PRECISION_FACTOR);
     }
 
-    function test_Invest_RevertWhen_AmountExceedsBalance() public localTest accountCreated {
+    function test_Invest_RevertWhen_AmountExceedsBalance() public accountCreated {
         uint256 amountToDeposit = 1 * PRECISION_FACTOR;
         uint256 amountToInvest = amountToDeposit + 1 * PRECISION_FACTOR;
         address collateral = $.deployConfig.wethTokenAddress;
@@ -909,7 +866,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Invest_InvestCollaterals() public ethSepoliaTest accountCreated deposited {
+    function test_Invest_InvestCollaterals() public accountCreated deposited {
         address weth = $.deployConfig.wethTokenAddress;
         uint256 amountToInvest = 2 * PRECISION_FACTOR;
         uint256 collateralRatio = $.sfAccount.getCustomCollateralRatio();
@@ -943,7 +900,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Invest_InvestAllCollaterals() public ethSepoliaTest accountCreated deposited {
+    function test_Invest_InvestAllCollaterals() public accountCreated deposited {
         address weth = $.deployConfig.wethTokenAddress;
         uint256 amountToInvest = INITIAL_USER_BALANCE;
         uint256 collateralRatio = $.sfAccount.getCustomCollateralRatio();
@@ -981,13 +938,13 @@ contract SFAccountTest is Test, Constants {
     /*                              Transfer SF Token                             */
     /* -------------------------------------------------------------------------- */
 
-    function test_Transfer_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Transfer_RevertWhen_NotFromEntryPoint() public accountCreated {
         address randomAccount = _createSFAccount(user);
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.transfer(randomAccount, 1 * PRECISION_FACTOR);
     }
 
-    function test_Transfer_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+    function test_Transfer_RevertWhen_AccountIsFrozen() public accountCreated {
         address randomAccount = _createSFAccount(user);
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
@@ -996,7 +953,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Transfer_RevertWhen_ReceiverIsRandomUser() public localTest accountCreated {
+    function test_Transfer_RevertWhen_ReceiverIsRandomUser() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector,
@@ -1007,7 +964,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.transfer(user, 1 * PRECISION_FACTOR);
     }
 
-    function test_Transfer_RevertWhen_ReceiverIsRandomContract() public localTest accountCreated {
+    function test_Transfer_RevertWhen_ReceiverIsRandomContract() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector,
@@ -1018,7 +975,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.transfer($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
     }
 
-    function test_Transfer_RevertWhen_ReceiverAddressIsZero() public localTest accountCreated {
+    function test_Transfer_RevertWhen_ReceiverAddressIsZero() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 BaseSFAccountPlugin.BaseSFAccountPlugin__NotSFAccount.selector,
@@ -1029,14 +986,14 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.transfer(address(0), 1 * PRECISION_FACTOR);
     }
 
-    function test_Transfer_RevertWhen_AmountToTransferIsZero() public localTest accountCreated {
+    function test_Transfer_RevertWhen_AmountToTransferIsZero() public accountCreated {
         address randomAccount = _createSFAccount(user);
         vm.expectRevert(ISFAccount.ISFAccount__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.transfer(randomAccount, 0);
     }
 
-    function test_Transfer_RevertWhen_AmountExceedsBalance() public localTest accountCreated {
+    function test_Transfer_RevertWhen_AmountExceedsBalance() public accountCreated {
         address randomAccount = _createSFAccount(user);
         uint256 amountToDeposit = 1 * PRECISION_FACTOR;
         address receiver = randomAccount;
@@ -1059,7 +1016,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Transfer_TransferSFToken() public ethSepoliaTest accountCreated deposited invested {
+    function test_Transfer_TransferSFToken() public accountCreated deposited invested {
         Transfer transfer = new Transfer();
         SFAccount sender = $.sfAccount;
         SFAccount receiver = SFAccount(_createSFAccount(user));
@@ -1078,7 +1035,7 @@ contract SFAccountTest is Test, Constants {
         assertEq(receiver.balance(), startingReceiverBalance + amountToTransfer);
     }
 
-    function test_Transfer_TransferAllSFToken() public ethSepoliaTest accountCreated deposited invested {
+    function test_Transfer_TransferAllSFToken() public accountCreated deposited invested {
         Transfer transfer = new Transfer();
         SFAccount sender = $.sfAccount;
         SFAccount receiver = SFAccount(_createSFAccount(user));
@@ -1101,7 +1058,7 @@ contract SFAccountTest is Test, Constants {
     /*                          Harvest from SF Protocol                          */
     /* -------------------------------------------------------------------------- */
 
-    function test_Harvest_RevertWhen_NotFromEntryPoint() public localTest accountCreated {
+    function test_Harvest_RevertWhen_NotFromEntryPoint() public accountCreated {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.harvest(
             $.deployConfig.wethTokenAddress, 
@@ -1110,7 +1067,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Harvest_RevertWhen_AccountIsFrozen() public localTest accountCreated {
+    function test_Harvest_RevertWhen_AccountIsFrozen() public accountCreated {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
@@ -1122,7 +1079,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Harvest_RevertWhen_CollateralAddressIsZero() public localTest accountCreated {
+    function test_Harvest_RevertWhen_CollateralAddressIsZero() public accountCreated {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -1137,7 +1094,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Harvest_RevertWhen_AmountToRedeemIsZero() public localTest accountCreated {
+    function test_Harvest_RevertWhen_AmountToRedeemIsZero() public accountCreated {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.harvest(
@@ -1147,7 +1104,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Harvest_RevertWhen_DebtToRepayIsZero() public localTest accountCreated {
+    function test_Harvest_RevertWhen_DebtToRepayIsZero() public accountCreated {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.harvest(
@@ -1157,7 +1114,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Harvest_RevertWhen_CollateralNotSupported() public localTest accountCreated {
+    function test_Harvest_RevertWhen_CollateralNotSupported() public accountCreated {
         address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1173,7 +1130,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Harvest_RevertWhen_DebtToRepayExceedsTotalDebt() public ethSepoliaTest accountCreated deposited invested {
+    function test_Harvest_RevertWhen_DebtToRepayExceedsTotalDebt() public accountCreated deposited invested {
         address collateral = $.deployConfig.wethTokenAddress;
         uint256 amountDeposited = $.sfAccount.getCollateralInvested(collateral);
         uint256 sfDebt = $.sfAccount.debt();
@@ -1193,7 +1150,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Harvest_RevertWhen_DebtToRepayExceedsBalance() public ethSepoliaTest accountCreated deposited invested {
+    function test_Harvest_RevertWhen_DebtToRepayExceedsBalance() public accountCreated deposited invested {
         address randomAccount = _createSFAccount(user);
         address collateral = $.deployConfig.wethTokenAddress;
         uint256 amountDeposited = $.sfAccount.getCollateralInvested(collateral);
@@ -1217,7 +1174,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Harvest_RevertWhen_AmountToRedeemExceedsDeposited() public ethSepoliaTest accountCreated deposited invested {
+    function test_Harvest_RevertWhen_AmountToRedeemExceedsDeposited() public accountCreated deposited invested {
         address collateral = $.deployConfig.wethTokenAddress;
         // For this test, SF balance is equal to SF debts
         uint256 sfBalance = $.sfAccount.balance();
@@ -1245,7 +1202,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Harvest_HarvestInvestment() public ethSepoliaTest accountCreated deposited invested {
+    function test_Harvest_HarvestInvestment() public accountCreated deposited invested {
         address weth = $.deployConfig.wethTokenAddress;
         address account = $.deployConfig.account;
         uint256 amountToRedeem = 1 * PRECISION_FACTOR;
@@ -1273,7 +1230,7 @@ contract SFAccountTest is Test, Constants {
         assertEq($.sfEngine.getSFDebt(address($.sfAccount)), startingDebt - debtToRepay);
     }
 
-    function test_Harvest_HarvestAllInvestment() public ethSepoliaTest accountCreated deposited invested {
+    function test_Harvest_HarvestAllInvestment() public accountCreated deposited invested {
         address weth = $.deployConfig.wethTokenAddress;
         uint256 collateralInvested = $.sfAccount.getCollateralInvested(weth);
         uint256 amountToRedeem = $.sfAccount.getCollateralInvested(weth);
@@ -1306,12 +1263,12 @@ contract SFAccountTest is Test, Constants {
     /*                              Top-up Collateral                             */
     /* -------------------------------------------------------------------------- */
 
-    function test_TopUp_RevertWhen_NotFromEntryPoint() public localTest accountCreated deposited {
+    function test_TopUp_RevertWhen_NotFromEntryPoint() public accountCreated deposited {
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
     }
 
-    function test_TopUp_RevertWhen_AccountIsFrozen() public localTest accountCreated deposited {
+    function test_TopUp_RevertWhen_AccountIsFrozen() public accountCreated deposited {
         vm.startPrank($.deployConfig.entryPointAddress);
         $.sfAccount.freeze();
         vm.expectRevert(IFreezePlugin.IFreezePlugin__AccountIsFrozen.selector);
@@ -1319,7 +1276,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_TopUp_RevertWhen_CollateralAddressIsZero() public localTest accountCreated deposited {
+    function test_TopUp_RevertWhen_CollateralAddressIsZero() public accountCreated deposited {
         vm.expectRevert(
             abi.encodeWithSelector(
                 IVaultPlugin.IVaultPlugin__CollateralNotSupported.selector,
@@ -1330,13 +1287,13 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.topUpCollateral(address(0), 1 * PRECISION_FACTOR);
     }
 
-    function test_TopUp_RevertWhen_AmountToTopUpIsZero() public localTest accountCreated deposited {
+    function test_TopUp_RevertWhen_AmountToTopUpIsZero() public accountCreated deposited {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 0);
     }
 
-    function test_TopUp_RevertWhen_CollateralNotSupported() public localTest accountCreated deposited {
+    function test_TopUp_RevertWhen_CollateralNotSupported() public accountCreated deposited {
         address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1348,13 +1305,13 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.topUpCollateral(collateral, 1 * PRECISION_FACTOR);
     }
 
-    function test_TopUp_RevertWhen_NotInvested() public localTest accountCreated deposited {
+    function test_TopUp_RevertWhen_NotInvested() public accountCreated deposited {
         vm.expectRevert(IVaultPlugin.IVaultPlugin__NotInvested.selector);
         vm.prank($.deployConfig.entryPointAddress);
         $.sfAccount.topUpCollateral($.deployConfig.wethTokenAddress, 1 * PRECISION_FACTOR);
     }
 
-    function test_TopUp_RevertWhen_AmountToTopUpExceedsBalance() public ethSepoliaTest accountCreated deposited invested {
+    function test_TopUp_RevertWhen_AmountToTopUpExceedsBalance() public accountCreated deposited invested {
         address collateral = $.deployConfig.wethTokenAddress;
         uint256 collateralBalance = $.sfAccount.getCollateralBalance(collateral);
         uint256 amountToTopUp = collateralBalance + 1 * PRECISION_FACTOR;
@@ -1371,7 +1328,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.topUpCollateral(collateral, amountToTopUp);
     }
 
-    function test_TopUp_TopUpCollaterals() public ethSepoliaTest accountCreated deposited invested {
+    function test_TopUp_TopUpCollaterals() public accountCreated deposited invested {
         address weth = $.deployConfig.wethTokenAddress;
         address account = $.deployConfig.account;
         uint256 amountToTopUp = 1 * PRECISION_FACTOR;
@@ -1407,7 +1364,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_TopUp_TopUpAllCollaterals() public ethSepoliaTest accountCreated deposited invested {
+    function test_TopUp_TopUpAllCollaterals() public accountCreated deposited invested {
         address weth = $.deployConfig.wethTokenAddress;
         address account = $.deployConfig.account;
         uint256 amountToTopUp = $.sfAccount.getCollateralBalance(weth);
@@ -1443,7 +1400,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_TopUp_AutoTopUp() public ethSepoliaTest accountCreated deposited invested {
+    function test_TopUp_AutoTopUp() public accountCreated deposited invested {
         uint256 newPrice = 1000 * 10 ** PRICE_FEED_DECIMALS;
         // Update weth price, make collateral ratio drop to 1
         MockV3Aggregator($.deployConfig.wethPriceFeedAddress).updateAnswer(int256(newPrice));
@@ -1464,7 +1421,7 @@ contract SFAccountTest is Test, Constants {
         assertEq(collateralRatio, $.sfAccount.getCustomCollateralRatio());
     }
 
-    function test_AutoTopUp_When_CollateralIsInsufficient() public ethSepoliaTest accountCreated {
+    function test_AutoTopUp_When_CollateralIsInsufficient() public accountCreated {
         address weth = $.deployConfig.wethTokenAddress;
         vm.prank($.sfAccount.owner());
         IERC20(weth).approve(address($.sfAccount), INVEST_AMOUNT);
@@ -1502,7 +1459,7 @@ contract SFAccountTest is Test, Constants {
     /*                                  Liquidate                                 */
     /* -------------------------------------------------------------------------- */
 
-    function test_Liquidate_RevertWhen_NotFromEntryPoint() public localTest accountCreated deposited {
+    function test_Liquidate_RevertWhen_NotFromEntryPoint() public accountCreated deposited {
         address liquidatorAccount = _createSFAccount(user);
         vm.expectRevert(abi.encode("account: not from EntryPoint"));
         ISFAccount(liquidatorAccount).liquidate(
@@ -1512,7 +1469,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_RevertWhen_AccountIsFrozen() public localTest accountCreated deposited {
+    function test_Liquidate_RevertWhen_AccountIsFrozen() public accountCreated deposited {
         address liquidatorAccount = _createSFAccount(user);
         vm.startPrank($.deployConfig.entryPointAddress);
         ISFAccount(liquidatorAccount).freeze();
@@ -1525,7 +1482,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Liquidate_RevertWhen_CollateralAddressIsZero() public localTest accountCreated deposited {
+    function test_Liquidate_RevertWhen_CollateralAddressIsZero() public accountCreated deposited {
         address liquidatorAccount = _createSFAccount(user);
         vm.expectRevert(
             abi.encodeWithSelector(
@@ -1541,7 +1498,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_RevertWhen_DebtToCoverIsZero() public localTest accountCreated deposited {
+    function test_Liquidate_RevertWhen_DebtToCoverIsZero() public accountCreated deposited {
         address liquidatorAccount = _createSFAccount(user);
         vm.expectRevert(IVaultPlugin.IVaultPlugin__TokenAmountCanNotBeZero.selector);
         vm.prank($.deployConfig.entryPointAddress);
@@ -1552,7 +1509,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_RevertWhen_CollateralNotSupported() public localTest accountCreated deposited {
+    function test_Liquidate_RevertWhen_CollateralNotSupported() public accountCreated deposited {
         address liquidatorAccount = _createSFAccount(user);
         address collateral = address(new MockERC20("test", "test", $.deployConfig.account, 1 ether));
         vm.expectRevert(
@@ -1569,7 +1526,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_RevertWhen_DebtToCoverExceedsTotalDebt() public ethSepoliaTest accountCreated deposited invested {
+    function test_Liquidate_RevertWhen_DebtToCoverExceedsTotalDebt() public accountCreated deposited invested {
         address liquidatorAccount = _createSFAccount(user);
         address collateral = $.deployConfig.wethTokenAddress;
         uint256 totalDebt = $.sfAccount.debt();
@@ -1589,7 +1546,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_RevertWhen_DebtToCoverExceedsBalance() public ethSepoliaTest accountCreated deposited invested {
+    function test_Liquidate_RevertWhen_DebtToCoverExceedsBalance() public accountCreated deposited invested {
         address liquidatorAccount = _createSFAccount(user);
         address collateral = $.deployConfig.wethTokenAddress;
         uint256 debtToCover = $.sfAccount.debt();
@@ -1609,7 +1566,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_LiquidateDebts() public ethSepoliaTest accountCreated deposited invested {
+    function test_Liquidate_LiquidateDebts() public accountCreated deposited invested {
         address liquidator = user;
         address liquidatorAccount = _createSFAccount(user);
         address weth = $.deployConfig.wethTokenAddress;
@@ -1662,7 +1619,7 @@ contract SFAccountTest is Test, Constants {
         );
     }
 
-    function test_Liquidate_LiquidateAllDebts() public ethSepoliaTest accountCreated deposited invested {
+    function test_Liquidate_LiquidateAllDebts() public accountCreated deposited invested {
         address liquidator = user;
         address liquidatorAccount = _createSFAccount(user);
         address weth = $.deployConfig.wethTokenAddress;
@@ -1718,7 +1675,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateCustomRecoveryConfig_RevertWhen_NotFromEntryPoint() 
         public 
-        localTest 
         accountCreated 
     {
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -1728,7 +1684,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateCustomRecoveryConfig_RevertWhen_AccountIsFrozen() 
         public 
-        localTest 
         accountCreated 
     {
         vm.startPrank($.deployConfig.entryPointAddress);
@@ -1741,7 +1696,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateCustomRecoveryConfig_RevertWhen_MinGuardianApprovalsIsZero()
         public 
-        localTest 
         accountCreated 
     {
         address[] memory guardiansToAdd = new address[](1);
@@ -1759,7 +1713,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateCustomRecoveryConfig_RevertWhen_GuardiansIsEmpty()
         public 
-        localTest 
         accountCreated 
     {
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -1775,7 +1728,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateCustomRecoveryConfig_RevertWhen_MinApprovalsExceedsGuardianAmount()
         public 
-        localTest 
         accountCreated 
     {
         address[] memory guardiansToAdd = new address[](1);
@@ -1800,7 +1752,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_UpdateCustomRecoveryConfig_RevertWhen_AccountIsRecovering()
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1816,7 +1767,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_UpdateCustomRecoveryConfig_Update() public localTest accountCreated {
+    function test_UpdateCustomRecoveryConfig_Update() public accountCreated {
         address guardian = _createSFAccount(user);
         address[] memory guardiansToUpdate = new address[](1);
         guardiansToUpdate[0] = guardian;
@@ -1855,7 +1806,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Initiate_RevertWhen_NotFromEntryPoint() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1866,7 +1816,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Initiate_RevertWhen_AccountIsFrozen() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1880,7 +1829,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Initiate_RevertWhen_AccountIsZeroAddress() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1892,7 +1840,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Initiate_RevertWhen_AccountIsRandomContract() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1904,7 +1851,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Initiate_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1920,7 +1866,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveInitiate_RevertWhen_NotCalledFromGuardian() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1931,7 +1876,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveInitiate_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1947,7 +1891,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveInitiate_RevertWhen_AccountIsRecovering() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1961,7 +1904,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveInitiate_When_AccountIsFrozen() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -1973,7 +1915,7 @@ contract SFAccountTest is Test, Constants {
         assertEq($.sfAccount.isRecovering(), true);
     }
 
-    function test_Initiate_InitiateRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Initiate_InitiateRecovery() public accountCreated recoveryConfigured {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -2005,7 +1947,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Approve_RevertWhen_NotFromEntryPoint() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2018,7 +1959,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Approve_RevertWhen_AccountIsFrozen() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2034,7 +1974,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Approve_RevertWhen_AccountIsZeroAddress() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2048,7 +1987,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Approve_RevertWhen_AccountIsRandomContract() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2062,7 +2000,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Approve_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2078,7 +2015,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveApprove_RevertWhen_NotCalledFromGuardian() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2089,7 +2025,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveApprove_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2105,7 +2040,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveApprove_RevertWhen_AccountIsNotRecovering() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2115,7 +2049,7 @@ contract SFAccountTest is Test, Constants {
         $.sfAccount.receiveApproveRecovery();
     }
 
-    function test_Approve_ApproveRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Approve_ApproveRecovery() public accountCreated recoveryConfigured {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -2154,7 +2088,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Complete_RevertWhen_NotFromEntryPoint() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2167,7 +2100,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Complete_RevertWhen_AccountIsFrozen() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2183,7 +2115,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Complete_RevertWhen_AccountIsZeroAddress() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2197,7 +2128,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Complete_RevertWhen_AccountIsRandomContract() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2211,7 +2141,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Complete_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2227,7 +2156,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_NotCalledFromGuardian() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2238,7 +2166,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2254,7 +2181,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_AccountIsNotRecovering() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2266,7 +2192,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_ApprovalsAreInsufficient() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {   
@@ -2289,7 +2214,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_RecoveryIsNotYetExecutable() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {   
@@ -2321,7 +2245,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_RecoveryIsCompleted() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {   
@@ -2340,7 +2263,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveComplete_RevertWhen_RecoveryIsCancelled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {   
@@ -2354,8 +2276,7 @@ contract SFAccountTest is Test, Constants {
     }
 
     function test_Complete_CompleteRecoveryWithoutTimeLock() 
-        public 
-        localTest
+        public
         accountCreated
         recoveryConfigured 
     {
@@ -2394,7 +2315,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Complete_CompleteRecoveryWithTimeLock() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured 
     {
@@ -2442,7 +2362,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Cancel_RevertWhen_NotFromEntryPoint() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2455,7 +2374,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Cancel_RevertWhen_AccountIsFrozen() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2471,7 +2389,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Cancel_RevertWhen_AccountIsZeroAddress() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2485,7 +2402,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Cancel_RevertWhen_AccountIsRandomContract() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2499,7 +2415,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_Cancel_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2515,7 +2430,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveCancel_RevertWhen_NotCalledFromGuardian() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2526,7 +2440,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveCancel_RevertWhen_RecoveryNotEnabled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2542,7 +2455,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveCancel_RevertWhen_AccountIsNotRecovering() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2554,7 +2466,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveCancel_RevertWhen_AccountIsCancelled() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2569,7 +2480,6 @@ contract SFAccountTest is Test, Constants {
 
     function test_ReceiveCancel_RevertWhen_AccountIsCompleted() 
         public 
-        localTest 
         accountCreated 
         recoveryConfigured
     {
@@ -2587,7 +2497,7 @@ contract SFAccountTest is Test, Constants {
         vm.stopPrank();
     }
 
-    function test_Cancel_CancelRecovery() public localTest accountCreated recoveryConfigured {
+    function test_Cancel_CancelRecovery() public accountCreated recoveryConfigured {
         address previousOwner = $.sfAccount.owner();
         address newOwner = user;
         ISocialRecoveryPlugin.CustomRecoveryConfig memory config = $.sfAccount.getCustomRecoveryConfig();
@@ -2625,13 +2535,25 @@ contract SFAccountTest is Test, Constants {
     }
 
     /* -------------------------------------------------------------------------- */
+    /*                              Storage Location                              */
+    /* -------------------------------------------------------------------------- */
+
+     function testCalculateStorageLocation() public pure {
+        bytes memory name = "stableflow.storage.BridgePlugin";
+        bytes32 b = keccak256(abi.encode(uint256(keccak256(name)) - 1)) & ~bytes32(uint256(0xff));
+        console2.logBytes32(b);
+    }
+
+    /* -------------------------------------------------------------------------- */
     /*                              Private Functions                             */
     /* -------------------------------------------------------------------------- */
 
     function _createSFAccount(address account) private returns (address) {
         // On sepolia testnet, a create collision error will occur in KeeperRegistryLogicA2_1.registerUpkeep
         // function while the nonce of KeeperRegistryLogicA2_1 is 1, so clear the code on this collision address
+        vm.etch(0x198af54f3Ef64CEB92BE2E8dD8fafb1E60306b70, bytes(""));
         vm.etch(0xFc7d18305f17ABf863d8c60CE01a4977d9Bb663c, bytes(""));
+        vm.etch(0x252add0BF9A5595e8943933bDfE52eC5a9304B39, bytes(""));
         CreateAccount createAccount = new CreateAccount();
         address calculatedAccountAddress = $.sfAccountFactory.calculateAccountAddress(
             address($.sfAccountBeacon), 

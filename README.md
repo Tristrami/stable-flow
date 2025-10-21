@@ -4,9 +4,17 @@
 
 ## 项目简介
 
-StableFlow 是一个去中心化稳定币协议，集成了 **账户抽象**、**多抵押品机制** 和 **全自动风险管理**。协议采用模块化架构，为 DeFi 生态系统提供安全、高效、可扩展的稳定币基础设施
+Stable Flow 是一个去中心化、跨链流通的稳定币协议，原生集成Chainlink CCIP 跨链协议、账户抽象，并提供多抵押品机制和全自动风险管理功能。协议采用模块化架构，为 DeFi 生态系统提供安全、高效、可扩展的稳定币基础设施
 
-## 功能特性
+## 核心功能
+
+- ​​智能账户抽象​​：支持免 Gas 交易、批量操作与社交恢复
+- ​​多抵押品引擎​​：超额抵押机制，支持多种资产
+- ​原生跨链流通​​：基于 Chainlink CCIP，实现安全的多链转移
+- ​自动风控系统​​：7×24 小时监控与自动补仓
+- ​模块化架构​​：可扩展设计，支持快速集成新功能
+
+## 模块介绍
 
 ### 智能账户抽象 (ERC-4337)
 - **智能合约钱包** - 每个用户拥有独立的智能合约账户
@@ -68,7 +76,13 @@ anvil
 启动 ethereum sepolia fork
 
 ```shell
-make-anvil-sepolia
+make anvil-sepolia
+```
+
+启动 avalanche fuji fork
+
+```shell
+make anvil-fuji
 ```
 
 执行测试
@@ -112,3 +126,66 @@ forge test
 - `recoveryTimeLock`: 执行社交恢复的时间锁，单位为秒，从监护人投票通过后开始计算
 - `socialRecoveryEnabled`: 是否开启社交恢复
 
+### 跨链配置
+
+配置文件位置：`script/config/ChainConfig.json`
+
+```json
+{
+  "mainChain": 11155111,
+  "supportedChains": [
+    11155111,
+    43113
+  ]
+}
+```
+
+- `mainChain`: 主链 id，用户只能在主链上使用智能账户，资产需要在主链上抵押
+- `supportedChains`: 所有支持的链 id
+
+### 跨链代币池配置
+
+配置文件位置：`script/config/PoolConfig.json`
+
+```json
+{
+  "11155111": [
+    {
+      "remoteChainSelector": 3478487238524512106,
+      "allowed": true,
+      "remotePoolAddress": "0x0756A4434Da1bfE16e2e29Fe0DC7f7b7df4745af",
+      "remoteTokenAddress": "0x0273C4B1e2682D0C317a1571aa16F060cF6C5192",
+      "outboundRateLimiterConfig": {
+        "isEnabled": false,
+        "capacity": 0,
+        "rate": 0
+      },
+      "inboundRateLimiterConfig": {
+        "isEnabled": false,
+        "capacity": 0,
+        "rate": 0
+      }
+    }
+  ],
+  "421614": [
+    {
+      "remoteChainSelector": 16015286601757825753, 
+      "allowed": true,
+      "remotePoolAddress": "0x26c39dAf444c0653BAC7611153481500754655E3",
+      "remoteTokenAddress": "0x1a596EF4c034A66CBA457C87260b119988cd4Fe7",
+      "outboundRateLimiterConfig": {
+        "isEnabled": false,
+        "capacity": 0,
+        "rate": 0
+      },
+      "inboundRateLimiterConfig": {
+        "isEnabled": false,
+        "capacity": 0,
+        "rate": 0
+      }
+    }
+  ] 
+}
+```
+
+配置字段与 CCIP 中 `TokenPool.ChainUpdate` 的字段相对应

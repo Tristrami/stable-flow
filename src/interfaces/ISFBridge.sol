@@ -93,4 +93,18 @@ interface ISFBridge is IERC165 {
         address receiver,
         uint256 amount
     ) external returns (bytes32 messageId);
+
+    /**
+     * @dev Calculates the cross-chain transfer fee using Chainlink CCIP
+     * @param destinationChainId The chain ID of the target blockchain
+     * @param receiver The address that will receive the tokens on the destination chain
+     * @param amount The amount of tokens to be transferred
+     * @return fee The estimated fee amount in LINK tokens
+     * @notice This function queries the CCIP Router for the current fee estimate
+     */
+    function getFee(
+        uint256 destinationChainId,
+        address receiver,
+        uint256 amount
+    ) external view returns (uint256 fee);
 }

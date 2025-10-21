@@ -14,6 +14,8 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import {BaseDeployment} from "./BaseDeployment.s.sol";
 import {Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
+import {RegistryModuleOwnerCustom} from "@chainlink/contracts/src/v0.8/ccip/tokenAdminRegistry/RegistryModuleOwnerCustom.sol";
+import {TokenAdminRegistry} from "@chainlink/contracts/src/v0.8/ccip/tokenAdminRegistry/TokenAdminRegistry.sol";
 
 contract DeployOnMainChain is BaseDeployment {
 
@@ -33,9 +35,9 @@ contract DeployOnMainChain is BaseDeployment {
         address sfBridgeAddress,
         address sfAccountFactoryAddress,
         address sfAccountBeaconAddress,
-        DeployHelper.DeployConfig memory deployConfig
+        DeployHelper.DeployConfig memory config
     ) {
-        deployConfig = deployHelper.getDeployConfig();
+        config = deployConfig;
         (sfTokenAddress, sfEngineAddress, sfTokenPoolAddress) = _deploySFTokenAndPoolAndEngine();
         sfBridgeAddress = _deploySFBridge(sfTokenAddress);
         sfAccountBeaconAddress = _deploySFAccountBeacon();
@@ -55,7 +57,6 @@ contract DeployOnMainChain is BaseDeployment {
         address sfEngineAddress,
         address sfTokenPoolAddress
     ) {
-        DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         bytes32 salt = _salt();
         tokenAddresses = [deployConfig.wethTokenAddress, deployConfig.wbtcTokenAddress];
         priceFeedAddresses = [deployConfig.wethPriceFeedAddress, deployConfig.wbtcPriceFeedAddress];
@@ -86,6 +87,15 @@ contract DeployOnMainChain is BaseDeployment {
             networkDetails.rmnProxyAddress,
             networkDetails.routerAddress
         );
+        // Set token admin as the token owner
+        RegistryModuleOwnerCustom(
+            networkDetails.registryModuleOwnerCustomAddress
+        ).registerAdminViaOwner(address(sfTokenProxy));
+        // Complete the registration process
+        TokenAdminRegistry tokenAdminRegistry = TokenAdminRegistry(networkDetails.tokenAdminRegistryAddress);
+        TokenAdminRegistry(networkDetails.tokenAdminRegistryAddress).acceptAdminRole(address(sfTokenProxy));
+        // Link token to the pool
+        tokenAdminRegistry.setPool(address(sfTokenProxy), address(sfTokenPool));
         // Grant minter role to SF Engine and SF token pool
         sfTokenProxy.addMinter(address(sfEngineProxy));
         sfTokenProxy.addMinter(address(sfTokenPool));
@@ -94,7 +104,6 @@ contract DeployOnMainChain is BaseDeployment {
     }
 
     function _deploySFAccountBeacon() private returns (address beaconAddress) {
-        DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         bytes32 salt = _salt();
         vm.startBroadcast(deployConfig.account);
         SFAccount sfAccount = new SFAccount{salt: salt}();
@@ -104,7 +113,6 @@ contract DeployOnMainChain is BaseDeployment {
     }
 
     function _deployAccountFactory(address sfEngine, address beacon) private returns (address accountFactoryAddress) {
-        DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         bytes32 salt = _salt();
         vm.startBroadcast(deployConfig.account);
         SFAccountFactory factory = new SFAccountFactory{salt: salt}();
@@ -137,7 +145,6 @@ contract DeployOnMainChain is BaseDeployment {
     }
 
     function _salt() private view returns (bytes32) {
-        DeployHelper.DeployConfig memory deployConfig = deployHelper.getDeployConfig();
         return keccak256(abi.encode(deployConfig.account, block.timestamp));
     }
 }
