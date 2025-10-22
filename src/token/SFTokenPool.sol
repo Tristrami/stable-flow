@@ -9,7 +9,7 @@ import {IERC20} from "@chainlink/contracts/src/v0.8/vendor/openzeppelin-solidity
 /**
  * @title SFTokenPool
  * @dev Chainlink CCIP-compatible token pool for SFToken cross-chain transfers
- * @notice Handles locking/burning on source chain and minting/releasing on destination chain
+ * @notice Handles locking/releasing on source chain and minting/burning on destination chain
  */
 contract SFTokenPool is TokenPool {
 
