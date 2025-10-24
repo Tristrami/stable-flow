@@ -52,8 +52,7 @@ library Logs {
      * ```
      */
     function findRecordedLogs(Vm vm, string memory eventSignature) 
-        internal 
-        view 
+        internal  
         returns (Vm.Log[] memory logs) 
     {
         bytes32 eventSigHash = keccak256(bytes(eventSignature));
