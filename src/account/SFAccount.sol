@@ -162,16 +162,6 @@ contract SFAccount is VaultPlugin, SocialRecoveryPlugin, ERC165 {
     }
 
     /// @inheritdoc BaseAccount
-    function execute(address /* target */, uint256 /* value */, bytes calldata /* data */) external pure override {
-        revert ISFAccount__OperationNotSupported();
-    }
-
-    /// @inheritdoc BaseAccount
-    function executeBatch(Call[] calldata /* calls */) external pure override {
-        revert ISFAccount__OperationNotSupported();
-    }
-
-    /// @inheritdoc BaseAccount
     function entryPoint() public view override returns (IEntryPoint) {
         return IEntryPoint(entryPointAddress);
     }
