@@ -6,10 +6,8 @@ import {SFToken} from "../src/token/SFToken.sol";
 import {SFTokenPool} from "../src/token/SFTokenPool.sol";
 import {SFAccount} from "../src/account/SFAccount.sol";
 import {SFAccountFactory} from "../src/account/SFAccountFactory.sol";
-import {ConfigHelper} from "./util/ConfigHelper.sol";
 import {BaseDeployment} from "./BaseDeployment.s.sol";
 
-import {Script, console2} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/UpgradeableBeacon.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";

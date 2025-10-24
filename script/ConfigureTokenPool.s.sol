@@ -3,8 +3,6 @@ pragma solidity ^0.8.24;
 
 import {SFTokenPool} from "../src/token/SFTokenPool.sol";
 import {ConfigHelper} from "./util/ConfigHelper.sol";
-import {RegistryModuleOwnerCustom} from "@chainlink/contracts/src/v0.8/ccip/tokenAdminRegistry/RegistryModuleOwnerCustom.sol";
-import {TokenAdminRegistry} from "@chainlink/contracts/src/v0.8/ccip/tokenAdminRegistry/TokenAdminRegistry.sol";
 import {TokenPool} from "@chainlink/contracts/src/v0.8/ccip/pools/TokenPool.sol";
 import {RateLimiter} from "@chainlink/contracts/src/v0.8/ccip/libraries/RateLimiter.sol";
 import {Script, console2} from "forge-std/Script.sol";
