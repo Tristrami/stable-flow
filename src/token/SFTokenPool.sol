@@ -126,7 +126,10 @@ contract SFTokenPool is TokenPool {
                 revert SFTokenPool__InsufficientSF(sfBalance, amount);
             }
             emit SFTokenPool__Release(receiver, amount);
-            i_sfToken.transfer(receiver, amount);
+            bool success = i_sfToken.transfer(receiver, amount);
+            if (!success) {
+                revert SFTokenPool__TransferFailed();
+            }
         } else {
             i_sfToken.mint(receiver, amount);
         }

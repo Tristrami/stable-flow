@@ -142,7 +142,7 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
         FreezeRecord memory freezeRecord = FreezeRecord({
             frozenBy: frozenBy,
             unfrozenBy: address(0),
-            isUnfozen: false
+            isUnfrozen: false
         });
         $.freezeRecords.push(freezeRecord);
         emit IFreezePlugin__FreezeAccount(frozenBy);
@@ -161,7 +161,7 @@ abstract contract FreezePlugin is IFreezePlugin, BaseSFAccountPlugin {
         FreezePluginStorage storage $ = _getFreezePluginStorage();
         $.frozen = false;
         FreezeRecord storage freezeRecord = $.freezeRecords[$.freezeRecords.length - 1];
-        freezeRecord.isUnfozen = true;
+        freezeRecord.isUnfrozen = true;
         freezeRecord.unfrozenBy = unfrozenBy;
         emit IFreezePlugin__UnfreezeAccount(unfrozenBy);
     }

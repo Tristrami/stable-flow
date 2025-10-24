@@ -15,7 +15,6 @@ remappings = [
     "aave-v3-origin/=lib/aave-address-book/lib/aave-v3-origin/src/"
 ]
 
-auto_detect_solc = true
 optimizer = true
 optimizer_runs = 200
 via_ir = true

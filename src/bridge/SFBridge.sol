@@ -106,7 +106,10 @@ contract SFBridge is ISFBridge, OwnableUpgradeable, UUPSUpgradeable, ERC165 {
         if (amount == 0) {
             revert ISFBridge__TokenAmountCanNotBeZero();
         }
-        localSFToken.transferFrom(msg.sender, address(this), amount);
+        bool success = localSFToken.transferFrom(msg.sender, address(this), amount);
+        if (!success) {
+            revert ISFBridge__TransferFailed(address(localSFToken), amount);
+        }
         uint64 destinationChainSelector = uint64(supportedChains.get(destinationChainId));
         Client.EVM2AnyMessage memory message = _createCCIPMessage(
             address(localSFToken),
@@ -116,8 +119,11 @@ contract SFBridge is ISFBridge, OwnableUpgradeable, UUPSUpgradeable, ERC165 {
         );
         IRouterClient routerClient = IRouterClient(routerAddress);
         uint256 fee = routerClient.getFee(destinationChainSelector, message);
-        IERC20(linkTokenAddress).transferFrom(msg.sender, address(this), fee);
-        IERC20(linkTokenAddress).approve(routerAddress, fee);
+        success = IERC20(linkTokenAddress).transferFrom(msg.sender, address(this), fee);
+        if (!success) {
+            revert ISFBridge__TransferFailed(linkTokenAddress, fee);
+        }
+        success = IERC20(linkTokenAddress).approve(routerAddress, fee);
         localSFToken.approve(routerAddress, amount);
         emit ISFBridge__Bridge(destinationChainSelector, receiver, amount);
         messageId = routerClient.ccipSend(destinationChainSelector, message);

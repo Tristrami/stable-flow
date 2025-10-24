@@ -1,12 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Script} from "forge-std/Script.sol";
 import {SFToken} from "../src/token/SFToken.sol";
 import {SFTokenPool} from "../src/token/SFTokenPool.sol";
-import {SFBridge} from "../src/bridge/SFBridge.sol";
-import {DeployHelper} from "./util/DeployHelper.sol";
-import {ConfigHelper} from "./util/ConfigHelper.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {BaseDeployment} from "./BaseDeployment.s.sol";
 import {Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";

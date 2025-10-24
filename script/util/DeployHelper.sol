@@ -3,9 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Script} from "forge-std/Script.sol";
 import {ConfigHelper} from "./ConfigHelper.sol";
-import {MockERC20} from "../../test/mocks/MockERC20.sol";
 import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
-import {MockAutomationRegistrar} from "../../test/mocks/MockAutomationRegistrar.sol";
 import {Constants} from "./Constants.sol";
 import {IVaultPlugin} from "../../src/interfaces/IVaultPlugin.sol"; 
 import {ISocialRecoveryPlugin} from "../../src/interfaces/ISocialRecoveryPlugin.sol"; 
@@ -13,7 +11,6 @@ import {AaveV3Sepolia} from "aave-address-book/src/AaveV3Sepolia.sol";
 import {MockReserveInterestRateStrategy} from "@aave/v3/core/contracts/mocks/tests/MockReserveInterestRateStrategy.sol";
 import {IPoolAddressesProvider} from "@aave/v3/core/contracts/interfaces/IPoolAddressesProvider.sol";
 import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
-import {EntryPoint} from "account-abstraction/contracts/core/EntryPoint.sol";
 import {Register} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
 /**

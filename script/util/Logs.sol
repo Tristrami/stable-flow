@@ -23,7 +23,10 @@ library Logs {
      * Vm.Log memory transferLog = Logs.findRecordedLog(vm, "Transfer(address,address,uint256)");
      * ```
      */
-    function findRecordedLog(Vm vm, string memory eventSignature) internal returns (Vm.Log memory log) {
+    function findRecordedLog(Vm vm, string memory eventSignature) 
+        internal 
+        returns (Vm.Log memory log) 
+    {
         Vm.Log[] memory logs = vm.getRecordedLogs();
         bytes32 eventSigHash = keccak256(bytes(eventSignature));
         for (uint256 i = 0; i < logs.length; i++) {
@@ -48,7 +51,11 @@ library Logs {
      * Vm.Log[] memory allTransfers = Logs.findRecordedLogs(vm, "Transfer(address,address,uint256)");
      * ```
      */
-    function findRecordedLogs(Vm vm, string memory eventSignature) internal returns (Vm.Log[] memory logs) {
+    function findRecordedLogs(Vm vm, string memory eventSignature) 
+        internal 
+        view 
+        returns (Vm.Log[] memory logs) 
+    {
         bytes32 eventSigHash = keccak256(bytes(eventSignature));
         Vm.Log[] memory recordedLogs = vm.getRecordedLogs();
         

@@ -49,6 +49,11 @@ interface ISFBridge is IERC165 {
      */
     error ISFBridge__DestinationChainIdCanNotBeCurrentChainId();
 
+    /**
+     * @dev Thrown when token transfer fails
+     */
+    error ISFBridge__TransferFailed(address token, uint256 amount);
+
     /** 
      * @dev Thrown when insufficient balance exists
      * @param balance Current available balance

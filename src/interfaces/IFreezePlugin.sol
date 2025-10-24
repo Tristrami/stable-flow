@@ -51,7 +51,7 @@ interface IFreezePlugin {
         address unfrozenBy;
         /// @dev Current state flag for this freeze record
         /// @notice true = unfrozen, false = currently frozen
-        bool isUnfozen;
+        bool isUnfrozen;
     }
 
     /* -------------------------------------------------------------------------- */

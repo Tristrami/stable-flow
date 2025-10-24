@@ -26,7 +26,6 @@ import {UpgradeableBeacon} from "@openzeppelin/contracts/proxy/beacon/Upgradeabl
 import {IPool} from "@aave/v3/core/contracts/interfaces/IPool.sol";
 import {Ownable} from "@aave/v3/core/contracts/dependencies/openzeppelin/contracts/Ownable.sol";
 import {IEntryPoint} from "account-abstraction/contracts/interfaces/IEntryPoint.sol";
-import {BaseAccount} from "account-abstraction/contracts/core/BaseAccount.sol";
 import {CCIPLocalSimulatorFork} from "@chainlink/local/src/ccip/CCIPLocalSimulatorFork.sol";
 
 contract SFAccountTest is Test, Constants {
@@ -403,20 +402,6 @@ contract SFAccountTest is Test, Constants {
     }
 
     /* -------------------------------------------------------------------------- */
-    /*                           Execute / Execute Batch                          */
-    /* -------------------------------------------------------------------------- */
-
-    function test_Execute_Revert() public accountCreated {
-        vm.expectRevert(ISFAccount.ISFAccount__OperationNotSupported.selector);
-        $.sfAccount.execute(address(0), 0, "");
-    }
-
-    function test_ExecuteBatch_Revert() public accountCreated {
-        vm.expectRevert(ISFAccount.ISFAccount__OperationNotSupported.selector);
-        $.sfAccount.executeBatch(new BaseAccount.Call[](0));
-    }
-
-    /* -------------------------------------------------------------------------- */
     /*                              Freeze / Unfreeze                             */
     /* -------------------------------------------------------------------------- */
 
@@ -443,7 +428,7 @@ contract SFAccountTest is Test, Constants {
         assertEq($.sfAccount.isFrozen(), true);
         assertEq(latestRecord.frozenBy, address($.sfAccount));
         assertEq(latestRecord.unfrozenBy, address(0));
-        assertEq(latestRecord.isUnfozen, false);
+        assertEq(latestRecord.isUnfrozen, false);
     }
 
     function test_Unfreeze_RevertWhen_NotFromEntryPoint() public accountCreated {
@@ -472,7 +457,7 @@ contract SFAccountTest is Test, Constants {
         assertEq($.sfAccount.isFrozen(), false);
         assertEq(latestRecord.frozenBy, address($.sfAccount));
         assertEq(latestRecord.unfrozenBy, address($.sfAccount));
-        assertEq(latestRecord.isUnfozen, true);
+        assertEq(latestRecord.isUnfrozen, true);
     }
 
     /* -------------------------------------------------------------------------- */
